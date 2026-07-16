@@ -502,6 +502,7 @@ function addPeca(){
           <option>Diamante</option>
           <option>Espinha de peixe - Direita</option>
           <option>Espinha de peixe - Esquerda</option>
+          <option>Espinha de peixe - Nenhum lado</option>
           <option>Horizontal</option>
           <option>Vertical</option>
           <option>Horizontal e espinha de peixe</option>
@@ -931,7 +932,7 @@ function gerarRelatorio(d){
     x.fillStyle='#FFCC00';x.font='800 13px Arial';x.textAlign='right';x.fillText('R 02-1',W-P,40);x.textAlign='left';
     yy=118;
     sec('DADOS DO CLIENTE');
-    kv('Responsável',d.resp);kv('Data',d.data);kv('Cliente',d.cliente);
+    kv('Responsável',d.resp);kv('Data',fmtData(d.data));kv('Cliente',d.cliente);
     kv('Contato',d.contato);kv('Fone',d.fone);
     yy+=4; sec('RECEBIMENTO');
     kv('Transporte',d.transp);kv('Nº NF',d.nf);kv('Divergências NF',d.nfdiv||'Não');
@@ -1018,7 +1019,7 @@ function gerarRelatorio(d){
     x.fillText('R 02-1 · App de Recebimento · Borrachas Petro · '+d.criado,W/2,H-20);x.textAlign='left';
     if(SHEET_URL&&EMAIL_COM){
       const b64=cv.toDataURL('image/jpeg',0.85);
-      postSheet(SHEET_URL,{action:'email',to:EMAIL_COM,assunto:'Recebimento — '+(d.cliente||'')+' ('+(d.data||'')+')',resumo:montarTexto(d),arquivo:b64,nome:'Recebimento_'+(d.cliente||'rolo').replace(/\s/g,'_')+'.jpg'});
+      postSheet(SHEET_URL,{action:'email',to:EMAIL_COM,assunto:'Recebimento — '+(d.cliente||'')+' ('+fmtData(d.data)+')',resumo:montarTexto(d),arquivo:b64,nome:'Recebimento_'+(d.cliente||'rolo').replace(/\s/g,'_')+'.jpg'});
       toast('Enviado por e-mail ao comercial'); return;
     }
     cv.toBlob(blob=>{
@@ -1044,13 +1045,14 @@ function pecaLinhas(p){
   if(p.visual&&Object.keys(p.visual).length)n++; // Inspeção
   return n+2; // folga p/ quebras de linha
 }
+function fmtData(s){if(!s)return '';const m=(''+s).match(/^(\d{4})-(\d{2})-(\d{2})/);return m?(m[3]+'/'+m[2]+'/'+m[1]):s;}
 function montarTexto(d){
   let t='*RECEBIMENTO DE SERVIÇO — Borrachas Petro (R 02-1)*\n';
   t+='Cliente: '+d.cliente+'\n';
   if(d.nf)t+='NF: '+d.nf+'\n';
   t+='Serviço: '+d.servico+(d.confcli==='Sim'?' (confirmado)':' ⚠️ NÃO confirmado')+'\n';
   t+='Peças: '+d.pecas.length+' ('+d.pecas.map(p=>p.cb).join(', ')+')\n';
-  t+='Recebido por: '+d.resp+' · '+d.data+'\n\n_(Ficha completa na imagem anexa)_';
+  t+='Recebido por: '+d.resp+' · '+fmtData(d.data)+'\n\n_(Ficha completa na imagem anexa)_';
   return t;
 }
 function wrapCount(ctx,text,maxW){ctx.font='13px Arial';const w=(text||'').split(' ');let l='',n=1;
@@ -1135,7 +1137,7 @@ function filtrarLista(){
     const badge=st==='Atendido'?'<span class="badge bok">✓ Atendido</span>':'<span class="badge bpend">● Pendente</span>';
     return `<div class="saved-item">
       <div style="flex:1;min-width:0"><b>${d.cliente||'—'}</b> ${d.nf?('· NF '+d.nf):''} ${badge}<br>
-      <span class="mini">${d.servico||''} · ${(d.pecas?d.pecas.length:0)} peça(s) · ${d.data||''}${d.resp?(' · '+d.resp):''}</span></div>
+      <span class="mini">${d.servico||''} · ${(d.pecas?d.pecas.length:0)} peça(s) · ${fmtData(d.data)}${d.resp?(' · '+d.resp):''}</span></div>
       <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
         <button class="ic" title="Editar" onclick="carregarParaEditar('${d.id}')">✏️</button>
         ${st!=='Atendido'?`<button class="ic icok" title="Marcar como atendido" onclick="marcarAtendido('${d.id}')">✔️</button>`:''}
