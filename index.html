@@ -59,6 +59,8 @@
   .addsub{width:100%;border:2px dashed var(--amarelo2);background:#fffdf2;color:#9a7d00;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:6px}
   .sqchip.on.ok{background:#e7f6ee;border-color:var(--verde);color:var(--verde)}
   .sqchip.on.bad{background:#fdecea;border-color:var(--vermelho);color:var(--vermelho)}
+  .nabtn{flex:0 0 auto;border:1.5px solid var(--borda);border-radius:9px;background:#fafafa;font-weight:800;font-size:12px;color:#888;padding:0 14px;cursor:pointer}
+  .nabtn.on{background:var(--amarelo);border-color:#000;color:#000}
   .photos{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:8px}
   .photo{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;border:1px solid var(--borda)}
   .photo img{width:100%;height:100%;object-fit:cover}
@@ -497,8 +499,10 @@ function addPeca(){
       </div>
       <div class="acabmed hide" data-am="Friso">
         <div class="grp">Friso</div>
-        <div class="row"><div><label>Tipo</label><select class="ac_friso_tipo">
+        <label>Tipo</label>
+        <select class="ac_friso_tipo" onchange="frisoTipoChange(this)">
           <option value="">Selecione o tipo…</option>
+          <option>Padrão</option>
           <option>Diamante</option>
           <option>Espinha de peixe - Direita</option>
           <option>Espinha de peixe - Esquerda</option>
@@ -508,10 +512,12 @@ function addPeca(){
           <option>Horizontal e espinha de peixe</option>
           <option>Helicoidal</option>
           <option>NA</option>
-        </select></div>
-        <div><label>Largura (mm)</label><input type="text" inputmode="decimal" class="ac_friso_larg"></div></div>
-        <div class="row"><div><label>Profundidade (mm)</label><input type="text" inputmode="decimal" class="ac_friso_prof"></div>
-        <div><label>Quantidade</label><input type="text" inputmode="numeric" class="ac_friso_qtd"></div></div>
+        </select>
+        <div class="frisoDim">
+          <div class="row"><div><label>Largura (mm)</label><input type="text" inputmode="decimal" class="ac_friso_larg"></div>
+          <div><label>Profundidade (mm)</label><input type="text" inputmode="decimal" class="ac_friso_prof"></div></div>
+          <label>Quantidade</label><input type="text" inputmode="numeric" class="ac_friso_qtd">
+        </div>
       </div>
       <input type="text" class="p_acaboutros desc hide" placeholder="Qual? Descrever o acabamento…">
     </div>
@@ -568,6 +574,7 @@ function addPeca(){
     </div>
   `;
   document.getElementById('pecas').appendChild(div);
+  div.querySelectorAll('input[inputmode]').forEach(addNAbutton);
 
   div.querySelectorAll('.cbseg button').forEach(b=>{
     b.onclick=()=>{
@@ -645,6 +652,7 @@ function addPeca(){
         row.innerHTML='<div style="flex:2;font-weight:700;font-size:13px;color:#333">'+nome+'</div>'+
           '<div style="flex:1"><input type="text" inputmode="numeric" class="xq" data-xk="'+nome+'" placeholder="Qtd" style="margin-bottom:0"></div>';
         acessQtds.appendChild(row);
+        addNAbutton(row.querySelector('.xq'));
       }else{
         pecasState[id].acessSet.delete(nome);
         const ex=acessQtds.querySelector('.acessqtd[data-xk="'+nome+'"]'); if(ex)ex.remove();
@@ -714,6 +722,18 @@ function renderDesenho(id){
 }
 function desenhoFoto(id,e){const f=e.target.files[0];if(!f){return;}compressImg(f,url=>{pecasState[id].desenhoFoto=url;renderDesenho(id);});e.target.value='';}
 function desenhoDelFoto(id){pecasState[id].desenhoFoto='';renderDesenho(id);}
+function frisoTipoChange(sel){const box=sel.closest('.acabmed');if(!box)return;const dim=box.querySelector('.frisoDim');if(dim)dim.classList.toggle('hide',sel.value==='Padrão');}
+// botão "NA" ao lado de cada campo numérico (teclado numérico não digita letras)
+function addNAbutton(inp){
+  if(!inp||inp.dataset.nab)return; inp.dataset.nab='1';
+  const wrap=document.createElement('div'); wrap.style.cssText='display:flex;gap:6px;align-items:stretch;margin-bottom:13px';
+  inp.parentNode.insertBefore(wrap,inp); wrap.appendChild(inp); inp.style.marginBottom='0'; inp.style.flex='1';
+  const b=document.createElement('button'); b.type='button'; b.className='nabtn'; b.textContent='NA';
+  const sync=()=>b.classList.toggle('on',((inp.value||'').trim().toUpperCase()==='NA'));
+  b.onclick=()=>{ if(((inp.value||'').trim().toUpperCase()==='NA'))inp.value=''; else inp.value='NA'; sync(); };
+  inp.addEventListener('input',sync);
+  wrap.appendChild(b); sync();
+}
 
 // ============ FOTOS ============
 function addFotos(e){
@@ -841,25 +861,22 @@ function enviar(){
     const gt=cls=>{const el=pe.querySelector('.'+cls);return el?el.value.trim():'';};
     const faltou=cls=>{const el=pe.querySelector('.'+cls);if(el)el.classList.toggle('field-err',!el.value.trim());return el&&!el.value.trim();};
     if(!st.cb)erros.push(n+'chegou com/sem borracha');
-    let brancos=0;
-    ['p_dint','p_dextsol','p_dextmed','p_areautil','p_compsol','p_compmed','p_produto','p_qtde','p_durmed','p_dursol','p_peso'].forEach(c=>{if(faltou(c))brancos++;});
-    if(brancos)erros.push(n+'preencher todos os campos (use NA onde não se aplica)');
+    // campos de TEXTO obrigatórios (números são opcionais — podem ficar em branco ou NA)
+    if(faltou('p_produto'))erros.push(n+'Produto (escreva NA se não tiver)');
+    if(faltou('p_durmed'))erros.push(n+'Dureza medida/cor (escreva NA se não tiver)');
+    if(faltou('p_dursol'))erros.push(n+'Dureza solicitada (escreva NA se não tiver)');
     if(!st.desenhoSN)erros.push(n+'Tem desenho?');
     if(!st.acab)erros.push(n+'Tipo de acabamento?');
     else if(st.acab==='Sim'){
       if(!st.acabSet||st.acabSet.size===0)erros.push(n+'escolher o tipo de acabamento');
       else{
-        if(st.acabSet.has('Friso')&&(faltou('ac_friso_tipo')|faltou('ac_friso_larg')|faltou('ac_friso_prof')|faltou('ac_friso_qtd')))erros.push(n+'Friso: preencher tudo (use NA)');
-        if(st.acabSet.has('Bombê')&&faltou('ac_bombe_comp'))erros.push(n+'Bombê: comprimento (use NA)');
-        if(st.acabSet.has('Ressalto')&&(faltou('ac_ress_comp')|faltou('ac_ress_diam')))erros.push(n+'Ressalto: preencher tudo (use NA)');
-        if(st.acabSet.has('Rebaixo')&&(faltou('ac_reb_comp')|faltou('ac_reb_diam')))erros.push(n+'Rebaixo: preencher tudo (use NA)');
+        if(st.acabSet.has('Friso')){const ft=pe.querySelector('.ac_friso_tipo');if(!ft||!ft.value.trim())erros.push(n+'Friso: escolher o tipo');}
         if(st.acabSet.has('Outros')&&faltou('p_acaboutros'))erros.push(n+'Acabamento Outros: descrever');
       }
     }
     if(!st.acessSN)erros.push(n+'Acessório?');
     else if(st.acessSN==='Sim'){
       if(!st.acessSet||st.acessSet.size===0)erros.push(n+'escolher o acessório');
-      else st.acessSet.forEach(nome=>{const inp=pe.querySelector('.xq[data-xk="'+nome+'"]');if(!inp||!inp.value.trim())erros.push(n+'quantidade de '+nome+' (use NA)');});
     }
     if(!st.ptSN)erros.push(n+'Ponteira?');
     else if(st.ptSN==='Sim'){ if(!st.pt||!st.pt.length)erros.push(n+'adicionar ponteira'); else st.pt.forEach((x,i)=>{if(!x.q)erros.push(n+'avaliar ponteira '+(i+1));}); }
@@ -1230,7 +1247,7 @@ function carregarParaEditar(id){
     if(ad.confirmar)acTipos.push('A confirmar');
     if(!acTipos.length&&p.acabamento){['Friso','Bombê','Ressalto','Rebaixo','A confirmar','Outros'].forEach(t=>{if(p.acabamento.indexOf(t)>=0)acTipos.push(t);});}
     acTipos.forEach(t=>{const c=[].slice.call(pe.querySelectorAll('.achip')).find(x=>x.dataset.av===t);if(c&&!c.classList.contains('on'))c.click();});
-    if(ad.friso){set('ac_friso_tipo',ad.friso.tipo);set('ac_friso_larg',ad.friso.larg);set('ac_friso_prof',ad.friso.prof);set('ac_friso_qtd',ad.friso.qtd);}
+    if(ad.friso){set('ac_friso_tipo',ad.friso.tipo);set('ac_friso_larg',ad.friso.larg);set('ac_friso_prof',ad.friso.prof);set('ac_friso_qtd',ad.friso.qtd);const ft=pe.querySelector('.ac_friso_tipo');if(ft)frisoTipoChange(ft);}
     if(ad.bombe){set('ac_bombe_comp',ad.bombe.comp);}
     if(ad.ressalto){set('ac_ress_comp',ad.ressalto.comp);set('ac_ress_diam',ad.ressalto.diam);}
     if(ad.rebaixo){set('ac_reb_comp',ad.rebaixo.comp);set('ac_reb_diam',ad.rebaixo.diam);}
