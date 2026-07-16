@@ -1078,10 +1078,47 @@ function wrapText(ctx,text,x0,y0,maxW,lh){const w=(text||'').split(' ');let l=''
   w.forEach(p=>{if(ctx.measureText(l+p).width>maxW){ctx.fillText(l,x0,yy);l=p+' ';yy+=lh;}else l+=p+' ';});ctx.fillText(l,x0,yy);}
 
 // ============ PERSISTÊNCIA ============
+// remove as FOTOS de recebimentos com mais de X dias (mantém os dados; libera espaço do aparelho)
+function _limparFotosAntigas(dias){
+  dias=dias||30; const limite=Date.now()-dias*864e5;
+  let arr; try{arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){return;}
+  let mudou=false;
+  arr.forEach(d=>{
+    const ts=Number(d&&d.id)||0;
+    if(ts&&ts<limite){
+      if(d.fotos&&d.fotos.length){d.fotos=[];mudou=true;}
+      (d.pecas||[]).forEach(p=>{
+        if(p.desenhoFoto){p.desenhoFoto='';mudou=true;}
+        (p.ponteiras||[]).forEach(x=>{if(x.foto){x.foto='';mudou=true;}});
+        (p.furos||[]).forEach(x=>{if(x.foto){x.foto='';mudou=true;}});
+      });
+    }
+  });
+  if(mudou){try{localStorage.setItem('petro_receb',JSON.stringify(arr));}catch(e){}}
+}
+// tira as fotos de TODOS os registros (última tentativa quando a memória enche)
+function _semTodasFotos(arr){
+  return arr.map(d=>{const c=Object.assign({},d);c.fotos=[];
+    if(c.pecas)c.pecas=c.pecas.map(p=>{const pp=Object.assign({},p);pp.desenhoFoto='';
+      if(pp.ponteiras)pp.ponteiras=pp.ponteiras.map(x=>Object.assign({},x,{foto:''}));
+      if(pp.furos)pp.furos=pp.furos.map(x=>Object.assign({},x,{foto:''}));return pp;});
+    return c;});
+}
+// grava com proteção contra memória cheia (nunca deixa travar o envio)
+function _guardaReceb(arr){
+  try{ localStorage.setItem('petro_receb',JSON.stringify(arr)); return true; }
+  catch(e){
+    _limparFotosAntigas(30);
+    try{ localStorage.setItem('petro_receb',JSON.stringify(arr)); return true; }catch(e2){}
+    try{ localStorage.setItem('petro_receb',JSON.stringify(_semTodasFotos(arr)));
+      toast('Memória do aparelho cheia — salvei sem as fotos (elas já foram no e-mail).'); return true; }catch(e3){}
+    toast('Memória do aparelho cheia. O envio pro comercial e a planilha foram feitos.'); return false;
+  }
+}
 function salvarLocal(d){
-  let arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');
+  let arr; try{arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){arr=[];}
   const i=arr.findIndex(a=>a.id===d.id);if(i>=0)arr[i]=d;else arr.unshift(d);
-  localStorage.setItem('petro_receb',JSON.stringify(arr));renderSaved();
+  _guardaReceb(arr);renderSaved();
 }
 let LISTA_ATUAL=[], ACOES_ATUAL=true;
 // ---- clientes salvos (autocomplete) ----
@@ -1355,6 +1392,7 @@ document.getElementById('data').valueAsDate=new Date();
 if(OPERADOR)document.getElementById('resp').value=OPERADOR;
 document.getElementById('cliente').addEventListener('change',_preencheCliente);
 document.getElementById('cliente').addEventListener('blur',_preencheCliente);
+_limparFotosAntigas(30);
 renderSaved();
 addPeca();
 atualizarClientes();
