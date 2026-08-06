@@ -1106,7 +1106,7 @@ function confirmarEnviar(){
   else { mandar(d); }
 }
 function coletar(pecas){
-  var prev={}; if(editId){try{prev=(JSON.parse(localStorage.getItem('petro_receb')||'[]').find(a=>String(a.id)===String(editId)))||{};}catch(e){}}
+  var prev={}; if(editId){try{prev=(JSON.parse(localStorage.getItem('petro_receb')||'[]').find(a=>String(a.id)===String(editId)))||((LISTA_ATUAL||[]).find(a=>String(a.id)===String(editId)))||{};}catch(e){}}
   return {
     id:editId||Date.now(),
     action:editId?'editar':'novo', status:(_statusLocal(editId)||'Pendente'),
@@ -1628,7 +1628,14 @@ function renderSaved(){
 function carregarNuvem(){
   if(!SHEET_URL)return;
   const cb='cbPetro_'+Date.now();
-  window[cb]=function(arr){try{renderFromArray(arr||[],'Planilha · todos os aparelhos',false);}catch(e){}
+  window[cb]=function(arr){try{
+      // mescla planilha + aparelho: o registro local (recém-editado) prevalece pelo id
+      var cloud=arr||[]; var local=[]; try{local=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){}
+      var map={}; cloud.forEach(function(r){if(r&&r.id!=null)map[String(r.id)]=r;});
+      local.forEach(function(r){if(r&&r.id!=null)map[String(r.id)]=r;});
+      var merged=Object.keys(map).map(function(k){return map[k];});
+      renderFromArray(merged,'Planilha · todos os aparelhos',true);
+    }catch(e){}
     delete window[cb]; const s2=document.getElementById(cb+'_s'); if(s2)s2.remove();};
   const s=document.createElement('script'); s.id=cb+'_s';
   s.src=SHEET_URL+(SHEET_URL.indexOf('?')<0?'?':'&')+'callback='+cb+'&t='+Date.now();
