@@ -1334,7 +1334,7 @@ function gerarPDFdoc(d){
     });
     y=maxY+3;
   }
-  function _insp(p,kind){ var s=(p.visual&&p.visual[kind])||''; return /n[ãa]o\s*conforme/i.test(s)?'Não conforme':(s?'Conforme':''); }
+  function _insp(p,kind){ var s=(p.visual&&p.visual[kind])||''; if(!s)return ''; if(/n[ãa]o\s*conforme/i.test(s)){ var m=s.match(/\(([^)]*)\)/); return 'Não conforme'+(m?' ('+m[1]+')':''); } return 'Conforme'; }
   // ---- tabela de peças: só colunas preenchidas + colunas de orçamento ----
   function tabelaPecas(){
     var cand=[
@@ -1347,12 +1347,13 @@ function gerarPDFdoc(d){
       {h:'Comp sol',w:15,g:function(p){return p.compsol||'';}},
       {h:'Comp med',w:15,g:function(p){return p.compmed||'';}},
       {h:'Produto',w:20,g:function(p){return p.produto||'';}},
+      {h:'Qtde',w:11,g:function(p){return p.qtde||'';}},
       {h:'Dur med/cor',w:18,g:function(p){return p.durmed||'';}},
       {h:'Dur sol',w:14,g:function(p){return p.dursol||'';}},
       {h:'Acabamento',w:24,g:function(p){return p.acabamento||(p.acab==='Não'?'Não':'');}},
       {h:'Acessórios',w:20,g:function(p){return p.acess||(p.acessSN==='Não'?'Não':'');}},
-      {h:'Ponteira',w:18,g:function(p){return _insp(p,'ponteira');}},
-      {h:'Furo centro',w:18,g:function(p){return _insp(p,'furo');}},
+      {h:'Ponteira',w:22,g:function(p){return _insp(p,'ponteira');}},
+      {h:'Furo centro',w:22,g:function(p){return _insp(p,'furo');}},
       {h:'Estado',w:14,g:function(p){return (p.visual&&p.visual.estado)||'';}},
       {h:'Desenho',w:12,g:function(p){return p.desenhoSN||'';}}
     ];
