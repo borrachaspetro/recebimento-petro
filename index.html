@@ -1681,9 +1681,12 @@ function filtrarLista(){
     const etapaLbl={admissao:'Admissão',comercial:'Comercial',orcamento:'Orçamento'}[etapa]||'Comercial';
     const cor={admissao:['#FDE2E1','#C0392B'],comercial:['#FCF3CF','#8a6d00'],orcamento:['#D6EAF8','#1F618D']}[etapa]||['#FCF3CF','#8a6d00'];
     const badge=concl?'<span class="badge" style="background:#D1F2EB;color:#0E6655">✓ Concluído</span>':('<span class="badge" style="background:'+cor[0]+';color:'+cor[1]+'">● Pendente '+etapaLbl+'</span>');
+    const _np=(d.pecas?d.pecas.length:0);
+    const _tq=(d.pecas||[]).reduce((s,p)=>s+(parseInt(p&&p.qtde,10)||0),0);
+    const _pcs=_np+' item(ns)'+(_tq?(' · '+_tq+' pç'):'');
     return `<div class="saved-item">
       <div style="flex:1;min-width:0"><b>${d.cliente||'—'}</b> ${d.nf?('· NF '+d.nf):''} ${badge}<br>
-      <span class="mini">${d.servico||''} · ${(d.pecas?d.pecas.length:0)} peça(s) · ${fmtData(d.data)}${d.resp?(' · '+d.resp):''}</span></div>
+      <span class="mini">${d.servico||''} · ${_pcs} · ${fmtData(d.data)}${d.resp?(' · '+d.resp):''}</span></div>
       <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
         <button class="ic" title="Editar" onclick="carregarParaEditar('${d.id}')">✏️</button>
         <button class="ic" title="Ver PDF do relatório" style="color:#C0392B;font-weight:800;font-size:12px" onclick="verPDF('${d.id}')">PDF</button>
