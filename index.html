@@ -654,8 +654,9 @@ function addPeca(){
     </div>
     <div class="consMsg hide" id="ptCons-${id}" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#FDE2E1;color:#C0392B;font-weight:700;font-size:13px">⚠️ Precisa conserto</div>
     <div class="ptBox hide" id="ptBox-${id}">
+      <div class="grp" style="font-size:12px;color:#8a6d00">📷 Foto de cada ponteira (obrigatório)</div>
       <div class="ptList"></div>
-      <button type="button" class="addsub" onclick="subAdd(${id},'pt')">＋ Adicionar registro (foto)</button>
+      <button type="button" class="addsub" onclick="subAdd(${id},'pt')">＋ Adicionar ponteira / foto</button>
     </div>
 
     <div class="grp" style="color:#333">Furo de centro</div>
@@ -665,8 +666,9 @@ function addPeca(){
     </div>
     <div class="consMsg hide" id="fcCons-${id}" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#FDE2E1;color:#C0392B;font-weight:700;font-size:13px">⚠️ Precisa conserto</div>
     <div class="fcBox hide" id="fcBox-${id}">
+      <div class="grp" style="font-size:12px;color:#8a6d00">📷 Foto do furo de centro</div>
       <div class="fcList"></div>
-      <button type="button" class="addsub" onclick="subAdd(${id},'fc')">＋ Adicionar registro (foto)</button>
+      <button type="button" class="addsub" onclick="subAdd(${id},'fc')">＋ Adicionar furo / foto</button>
     </div>
 
     <div class="grp" style="color:#333">Estado geral</div>
@@ -720,9 +722,9 @@ function addPeca(){
         const nc=(b.dataset.v==='Não conforme');
         b.classList.add('on'); b.classList.add(nc?'bad':'ok');
         pecasState[id][cfg[1]+'SN']=b.dataset.v;
-        document.getElementById(cfg[3]+'-'+id).classList.toggle('hide',!nc);
-        document.getElementById(cfg[2]+'-'+id).classList.toggle('hide',!nc);
-        if(!nc){ pecasState[id][cfg[1]]=[]; }
+        document.getElementById(cfg[3]+'-'+id).classList.toggle('hide',!nc); // "precisa conserto" só se não conforme
+        document.getElementById(cfg[2]+'-'+id).classList.remove('hide');      // caixa de fotos sempre visível ao escolher
+        if((pecasState[id][cfg[1]]||[]).length===0)pecasState[id][cfg[1]].push({q:'',foto:''}); // já deixa 1 registro p/ foto
         renderSubList(id,cfg[1]);
       };
     });
@@ -818,14 +820,15 @@ function renderSubList(id,kind){
   const arr=pecasState[id][kind]||[];
   const box=document.querySelector('#peca-'+id+' .'+kind+'List');
   if(!box)return;
+  const nc=(pecasState[id][kind+'SN']==='Não conforme'); // defeito só quando não conforme
   box.innerHTML=arr.map((it,i)=>`
     <div class="subitem">
       <div class="subhead"><b>${SUBLBL[kind]} ${i+1}</b>
         <button type="button" class="subrm" onclick="subRm(${id},'${kind}',${i})">remover</button></div>
-      <div class="chips" style="margin-bottom:8px">
+      ${nc?`<div class="chips" style="margin-bottom:8px">
         ${SUBQ[kind].map(q=>`<div class="chip sqchip ${it.q===q?('on '+(q==='OK'?'ok':'bad')):''}" onclick="subQ(${id},'${kind}',${i},'${q}')">${q}</div>`).join('')}
-      </div>
-      ${it.q==='Outros'?`<input type="text" class="subobs" placeholder="Descrever…" value="${(it.obs||'').replace(/"/g,'&quot;')}" oninput="subObs(${id},'${kind}',${i},this.value)" style="margin-bottom:8px">`:''}
+      </div>`:''}
+      ${nc&&it.q==='Outros'?`<input type="text" class="subobs" placeholder="Descrever…" value="${(it.obs||'').replace(/"/g,'&quot;')}" oninput="subObs(${id},'${kind}',${i},this.value)" style="margin-bottom:8px">`:''}
       ${it.foto
         ? `<div class="subthumb"><img src="${it.foto}"><button type="button" class="subrmfoto" onclick="subDelFoto(${id},'${kind}',${i})">×</button></div>`
         : `<label class="subfotobtn">📷 Tirar foto<input type="file" accept="image/*" capture="environment" hidden onchange="subFoto(${id},'${kind}',${i},event)"></label>`}
@@ -977,8 +980,8 @@ function coletarPecas(){
     // ---- inspeção visual ----
     const st=pecasState[id];
     const ptSN=st.ptSN||'', fcSN=st.fcSN||'';
-    const ptArr=(ptSN==='Não conforme')?st.pt.map(x=>({q:x.q||'',obs:x.obs||'',foto:x.foto||''})):[];
-    const fcArr=(fcSN==='Não conforme')?st.fc.map(x=>({q:x.q||'',obs:x.obs||'',foto:x.foto||''})):[];
+    const ptArr=(ptSN)?(st.pt||[]).map(x=>({q:x.q||'',obs:x.obs||'',foto:x.foto||''})):[];
+    const fcArr=(fcSN)?(st.fc||[]).map(x=>({q:x.q||'',obs:x.obs||'',foto:x.foto||''})):[];
     const estado=st.estado||'';
     const _dlbl=x=>((x.q==='Outros'&&x.obs)?x.obs:(x.q||'—'));
     const ptResumo = ptSN==='Não conforme' ? ('Não conforme — precisa conserto'+(ptArr.length?(' ('+ptArr.map(_dlbl).join(', ')+')'):'')) : (ptSN||'');
@@ -1048,10 +1051,14 @@ function salvarFicha(enviarDepois){
       if(!st.acessSet||st.acessSet.size===0)erros.push(n+'escolher o acessório');
     }
     if(!st.ptSN)erros.push(n+'Ponteira (Conforme/Não conforme)');
-    else if(st.ptSN==='Não conforme'&&st.pt) st.pt.forEach((x,i)=>{if(!x.q)erros.push(n+'classificar o defeito da ponteira '+(i+1));});
+    else{
+      if(!editId && !(st.pt&&st.pt.some(x=>x.foto)))erros.push(n+'Foto da ponteira (obrigatória)');
+      if(st.ptSN==='Não conforme'&&st.pt) st.pt.forEach((x,i)=>{if(!x.q)erros.push(n+'classificar o defeito da ponteira '+(i+1));});
+    }
     if(!st.fcSN)erros.push(n+'Furo de centro (Conforme/Não conforme)');
     else if(st.fcSN==='Não conforme'&&st.fc) st.fc.forEach((x,i)=>{if(!x.q)erros.push(n+'classificar o defeito do furo '+(i+1));});
     if(!st.estado)erros.push(n+'Estado geral');
+    if(!editId && !(st.fotosPeca&&st.fotosPeca.length))erros.push(n+'Foto da peça (obrigatória)'); // obrigatório só em recebimentos novos
   });
   erros=[...new Set(erros)];
 
@@ -1860,10 +1867,10 @@ function carregarParaEditar(id){
       }
       if(sn==='Sim') sn='Não conforme'; else if(sn==='Não') sn='Conforme'; // compat registros antigos
       if(sn){
-        if(sn==='Não conforme') pecasState[pid][cf[0]]=(arr||[]).map(x=>({q:x.q||'',obs:x.obs||'',foto:x.foto||''}));
+        if(arr&&arr.length) pecasState[pid][cf[0]]=arr.map(x=>({q:x.q||'',obs:x.obs||'',foto:x.foto||''}));
         const b=[].slice.call(pe.querySelectorAll('.'+cf[0]+'seg button')).find(x=>x.dataset.v===sn);
         if(b)b.click();
-        if(sn==='Não conforme') renderSubList(pid,cf[0]);
+        renderSubList(pid,cf[0]);
       }
     });
     const est=p.estado||v.estado||'';
