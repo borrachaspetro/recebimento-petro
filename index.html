@@ -24,13 +24,13 @@
   #secNav{display:none}
   @media(min-width:900px){
     body{font-size:15px}
-    .wrap{max-width:1180px;padding:18px 24px}
-    .footer-bar .max{max-width:1180px}
-    .tablink{max-width:1180px;margin:0 auto}
-    #view-novo .wrap{display:grid;grid-template-columns:236px 1fr;column-gap:22px;align-items:start}
+    .wrap{max-width:none;padding:18px 30px}
+    .footer-bar .max{max-width:none}
+    .tablink{max-width:none;margin:0}
+    #view-novo .wrap{display:grid;grid-template-columns:250px 1fr;column-gap:24px;align-items:start}
     #view-novo #admToggle{grid-column:2}
     #view-novo #secNav{grid-column:1;grid-row:1 / 999;position:sticky;top:74px;display:flex;flex-direction:column;gap:6px}
-    #view-novo .wrap > .card{grid-column:2;margin-bottom:0;display:none;max-width:880px}
+    #view-novo .wrap > .card{grid-column:2;margin-bottom:0;display:none}
     #view-novo .wrap > .card.ativa{display:block}
     #view-novo .card h2{cursor:default}
     .navitem{display:flex;align-items:center;gap:9px;text-align:left;background:var(--preto);border:1px solid #000;border-radius:10px;padding:10px 12px;font-weight:800;font-size:13px;color:var(--amarelo);cursor:pointer;transition:.12s}
