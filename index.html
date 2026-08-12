@@ -20,6 +20,17 @@
   header p{margin:2px 0 0;font-size:11px;opacity:.75}
   header .cod{margin-left:auto;background:var(--amarelo);color:#000;font-weight:800;font-size:11px;padding:4px 8px;border-radius:6px}
   .wrap{max-width:680px;margin:0 auto;padding:14px}
+  /* --- layout largo no computador (tela cheia) + menu accordion --- */
+  @media(min-width:900px){
+    body{font-size:15px}
+    .wrap{max-width:1100px;padding:18px 26px}
+    .footer-bar .max{max-width:1100px}
+    .tablink{max-width:1100px;margin:0 auto}
+    #view-novo .card h2{cursor:pointer;user-select:none}
+    #view-novo .card h2::after{content:'▾';margin-left:auto;font-size:12px;opacity:.75}
+    #view-novo .card.collapsed h2::after{content:'▸'}
+    #view-novo .card.collapsed .body{display:none}
+  }
   .card{background:#fff;border:1px solid var(--borda);border-radius:14px;margin-bottom:14px;overflow:hidden}
   .card h2{margin:0;background:var(--preto);color:var(--amarelo);font-size:12.5px;font-weight:800;
     padding:11px 14px;letter-spacing:.4px;text-transform:uppercase;display:flex;align-items:center;gap:8px}
@@ -143,6 +154,10 @@
 
 <div id="view-novo">
 <div class="wrap">
+
+  <div id="admToggle" class="hide" style="margin-bottom:12px">
+    <button class="btn btn-sec" style="width:100%;font-weight:700" onclick="toggleAdm()"><span id="admToggleTxt">▸ Mostrar dados da admissão</span></button>
+  </div>
 
   <!-- 1. RECEBIMENTO -->
   <div class="card">
@@ -621,7 +636,7 @@ function addPeca(){
       <div class="acessQtds"></div>
     </div>
 
-    <label>Peso (kg)</label>
+    <label>Peso da peça recebida (kg)</label>
     <input type="text" inputmode="decimal" class="p_peso">
 
     <div class="grp">Inspeção visual</div>
@@ -666,8 +681,8 @@ function addPeca(){
       <div style="flex:1"><label style="font-size:12px">Fórmula</label><input type="text" class="p_formula" style="margin-bottom:6px"></div>
     </div>
     <div style="display:flex;gap:8px">
-      <div style="flex:1"><label style="font-size:12px">Peso p/ orçamento (kg)</label><input type="text" inputmode="decimal" class="p_pesoorc" style="margin-bottom:6px"></div>
-      <div style="flex:1"><label style="font-size:12px">Preço</label><input type="text" inputmode="decimal" class="p_preco" style="margin-bottom:6px"></div>
+      <div style="flex:1"><label style="font-size:12px">Peso da fórmula (kg)</label><input type="text" inputmode="decimal" class="p_pesoorc" style="margin-bottom:6px"></div>
+      <div style="flex:1"><label style="font-size:12px">Preço (R$)</label><input type="text" inputmode="decimal" class="p_preco" style="margin-bottom:6px" onblur="formatMoeda(this)"></div>
     </div>
     </div>
   `;
@@ -876,6 +891,14 @@ function delFoto(i){fotos.splice(i,1);renderFotos();}
 
 // ============ VALIDAÇÃO + COLETA ============
 function val(id){return document.getElementById(id).value.trim();}
+// formata o valor digitado como moeda BR: 1250 -> R$ 1.250,00 ; 1250,5 -> R$ 1.250,50
+function formatMoeda(el){
+  var v=(el.value||'').trim(); if(!v){el.value='';return;}
+  if(/^NA$/i.test(v)){el.value='NA';return;}
+  v=v.replace(/[^\d,]/g,'').replace(',', '.'); // tira R$, pontos de milhar; vírgula vira decimal
+  var n=parseFloat(v); if(isNaN(n)){el.value='';return;}
+  el.value='R$ '+n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
 function coletarPecas(){
   const out=[];
   document.querySelectorAll('.peca').forEach(p=>{
@@ -1340,6 +1363,7 @@ function gerarPDFdoc(d){
     var cand=[
       {h:'Nº',w:7,always:true,g:function(p,i){return String(i+1);}},
       {h:'Revest.',w:13,g:function(p){return p.cb==='S/B'?'Sem':(p.cb==='C/B'?'Com':'');}},
+      {h:'Peso peça (kg)',w:13,g:function(p){return p.peso||'';}},
       {h:'Ø int',w:14,g:function(p){return p.dint||'';}},
       {h:'Ø ext sol',w:15,g:function(p){return p.dextsol||'';}},
       {h:'Ø ext med',w:15,g:function(p){return p.dextmed||'';}},
@@ -1360,7 +1384,7 @@ function gerarPDFdoc(d){
     var orc=[
       {h:'Molde',w:16,orc:true,g:function(p){return p.molde||'';}},
       {h:'Fórmula',w:18,orc:true,g:function(p){return p.formula||'';}},
-      {h:'Peso (kg)',w:14,orc:true,g:function(p){return p.pesoOrc||p.peso||'';}},
+      {h:'Peso fórmula (kg)',w:15,orc:true,g:function(p){return p.pesoOrc||'';}},
       {h:'Preço',w:18,orc:true,g:function(p){return p.preco||'';}}
     ];
     var cols=cand.filter(function(c){ return c.always || d.pecas.some(function(p,i){ return (''+c.g(p,i)).trim()!==''; }); });
@@ -1829,6 +1853,7 @@ function carregarParaEditar(id){
     if(d.etapa==='orcamento'||_temOrc){ var ob=pe.querySelector('.orcBlock'); if(ob)ob.classList.remove('hide'); }
   });
   fotos=(d.fotos&&Array.isArray(d.fotos))?d.fotos.slice():[];renderFotos();
+  initSecoes(); modoAdmissao(d.etapa,d.jaEnviado);
   window.scrollTo(0,0);toast('Editando — altere e toque em Enviar');
 }
 
@@ -1840,6 +1865,26 @@ function verTab(t){
   document.getElementById('tab-novo').classList.toggle('on',t==='novo');
   document.getElementById('tab-lista').classList.toggle('on',t==='lista');
   if(t==='lista')renderSaved();
+}
+// ---- accordion (só no computador) + ocultar dados da admissão p/ comercial/orçamento ----
+function _cardsAdmissao(){ return [].slice.call(document.querySelectorAll('#view-novo > .wrap > .card')).filter(function(c){return !c.querySelector('#pecas');}); }
+let _admAberto=true;
+function _aplicaAdm(){
+  _cardsAdmissao().forEach(function(c){ c.style.display=_admAberto?'':'none'; });
+  var t=document.getElementById('admToggleTxt'); if(t)t.textContent=_admAberto?'▾ Ocultar dados da admissão':'▸ Mostrar dados da admissão (cliente, NF, embalagem…)';
+}
+function toggleAdm(){ _admAberto=!_admAberto; _aplicaAdm(); }
+function modoAdmissao(etapa,enviado){
+  var oculta=!!enviado&&(etapa==='comercial'||etapa==='orcamento');
+  var tg=document.getElementById('admToggle'); if(tg)tg.classList.toggle('hide',!oculta);
+  _admAberto=!oculta; _aplicaAdm();
+  var pcs=document.getElementById('pecas'), pcard=pcs&&pcs.closest('.card');
+  if(oculta&&pcard)pcard.classList.remove('collapsed'); // deixa as peças abertas
+}
+function toggleSecao(h2){ if(window.innerWidth<900)return; var c=h2.closest('.card'); if(c)c.classList.toggle('collapsed'); }
+function initSecoes(){
+  var desk=window.innerWidth>=900;
+  document.querySelectorAll('#view-novo > .wrap > .card').forEach(function(c){ c.classList.toggle('collapsed', desk); });
 }
 function limparForm(ask){
   if(ask&&!confirm('Limpar o formulário?'))return;
@@ -1858,6 +1903,7 @@ function limparForm(ask){
   document.getElementById('errbox').classList.remove('show');
   document.getElementById('pecas').innerHTML='';Object.keys(pecasState).forEach(k=>delete pecasState[k]);
   addPeca();renderFotos();
+  modoAdmissao('',false); // mostra tudo de novo (novo recebimento)
   if(ask)toast('Formulário limpo');
 }
 function abrirConfig(){
@@ -1916,6 +1962,10 @@ _limparFotosAntigas(30);
 renderSaved();
 addPeca();
 atualizarClientes();
+// accordion no computador: cada seção abre ao clicar no título
+document.querySelectorAll('#view-novo .card h2').forEach(function(h){ h.addEventListener('click',function(){toggleSecao(h);}); });
+initSecoes();
+window.addEventListener('resize',initSecoes);
 </script>
 
 <!-- ════════ SYNC EM TEMPO REAL — FIREBASE (Petro) ════════
