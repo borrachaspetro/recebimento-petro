@@ -664,9 +664,9 @@ function addPeca(){
     </div>
     <div class="consMsg hide" id="ptCons-${id}" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#FDE2E1;color:#C0392B;font-weight:700;font-size:13px">⚠️ Precisa conserto</div>
     <div class="ptBox hide" id="ptBox-${id}">
-      <div class="grp" style="font-size:12px;color:#8a6d00">📷 Foto de cada ponteira (obrigatório)</div>
-      <div class="ptList"></div>
-      <button type="button" class="addsub" onclick="subAdd(${id},'pt')">＋ Adicionar ponteira / foto</button>
+      <div class="grp" style="font-size:12px;color:#8a6d00">📷 Fotos das ponteiras (obrigatório) — uma de cada extremidade</div>
+      <div class="ptList" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start"></div>
+      <button type="button" class="addsub" onclick="subAdd(${id},'pt')">＋ Adicionar foto</button>
     </div>
 
     <div class="grp" style="color:#333">Furo de centro</div>
@@ -676,9 +676,9 @@ function addPeca(){
     </div>
     <div class="consMsg hide" id="fcCons-${id}" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#FDE2E1;color:#C0392B;font-weight:700;font-size:13px">⚠️ Precisa conserto</div>
     <div class="fcBox hide" id="fcBox-${id}">
-      <div class="grp" style="font-size:12px;color:#8a6d00">📷 Foto do furo de centro</div>
-      <div class="fcList"></div>
-      <button type="button" class="addsub" onclick="subAdd(${id},'fc')">＋ Adicionar furo / foto</button>
+      <div class="grp" style="font-size:12px;color:#8a6d00">📷 Fotos do furo de centro</div>
+      <div class="fcList" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start"></div>
+      <button type="button" class="addsub" onclick="subAdd(${id},'fc')">＋ Adicionar foto</button>
     </div>
 
     <div class="grp" style="color:#333">Estado geral</div>
@@ -833,14 +833,12 @@ function renderSubList(id,kind){
   const nc=(pecasState[id][kind+'SN']==='Não conforme'); // defeito só quando não conforme
   box.innerHTML=arr.map((it,i)=>`
     <div class="subitem">
-      <div class="subhead"><b>${SUBLBL[kind]} ${i+1}</b>
-        <button type="button" class="subrm" onclick="subRm(${id},'${kind}',${i})">remover</button></div>
-      ${nc?`<div class="chips" style="margin-bottom:8px">
-        ${SUBQ[kind].map(q=>`<div class="chip sqchip ${it.q===q?('on '+(q==='OK'?'ok':'bad')):''}" onclick="subQ(${id},'${kind}',${i},'${q}')">${q}</div>`).join('')}
+      ${nc?`<div class="chips" style="margin-bottom:6px">
+        ${SUBQ[kind].map(q=>`<div class="chip sqchip ${it.q===q?'on bad':''}" onclick="subQ(${id},'${kind}',${i},'${q}')">${q}</div>`).join('')}
       </div>`:''}
-      ${nc&&it.q==='Outros'?`<input type="text" class="subobs" placeholder="Descrever…" value="${(it.obs||'').replace(/"/g,'&quot;')}" oninput="subObs(${id},'${kind}',${i},this.value)" style="margin-bottom:8px">`:''}
+      ${nc&&it.q==='Outros'?`<input type="text" class="subobs" placeholder="Descrever o defeito…" value="${(it.obs||'').replace(/"/g,'&quot;')}" oninput="subObs(${id},'${kind}',${i},this.value)" style="margin-bottom:6px">`:''}
       ${it.foto
-        ? `<div class="subthumb"><img src="${it.foto}"><button type="button" class="subrmfoto" onclick="subDelFoto(${id},'${kind}',${i})">×</button></div>`
+        ? `<div class="subthumb"><img src="${it.foto}"><button type="button" class="subrmfoto" onclick="subRm(${id},'${kind}',${i})">×</button></div>`
         : `<label class="subfotobtn">📷 Tirar foto<input type="file" accept="image/*" capture="environment" hidden onchange="subFoto(${id},'${kind}',${i},event)"></label>`}
     </div>`).join('');
 }
@@ -1344,7 +1342,7 @@ function _pdfFileName(d){
   return _tituloFicha(d).replace(/[\\/:*?"<>|]/g,'-').replace(/\s+/g,' ').trim()+'.pdf';
 }
 function gerarPDFdoc(d){
-  d=Object.assign({},d); d.fotos=(d.fotos||[]).slice().concat(_subFotos(d));
+  d=Object.assign({},d); d.fotos=(d.fotos||[]).slice(); // gerais; as demais são agrupadas por tipo no rodapé
   var jsPDF=window.jspdf.jsPDF;
   var doc=new jsPDF({unit:'mm',format:'a4',orientation:'landscape'});
   var pageW=297,pageH=210,M=8,CW=pageW-2*M,y=0;
@@ -1473,14 +1471,14 @@ function gerarPDFdoc(d){
     });
     y+=1;
   }
-  function drawFotosPDF(){
-    if(!d.fotos.length)return;
-    ensure(14);
+  function _galeria(titulo,list){
+    if(!list||!list.length)return;
+    ensure(16);
     doc.setFillColor(105,105,105);doc.rect(M,y,CW,6,'F');
     doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(8.5);
-    doc.text('FOTOS',M+2,y+4.1); y+=8;
+    doc.text(titulo,M+2,y+4.1); y+=8;
     var cols=5,gap=4,fw=(CW-(cols-1)*gap)/cols,fh=fw*0.72,col=0;
-    d.fotos.forEach(function(src){
+    list.forEach(function(src){
       if(col===0)ensure(fh+gap+2);
       var px=M+col*(fw+gap);
       try{doc.addImage(src,'JPEG',px,y,fw,fh);}catch(e){try{doc.addImage(src,'PNG',px,y,fw,fh);}catch(e2){}}
@@ -1488,6 +1486,23 @@ function gerarPDFdoc(d){
       col++; if(col>=cols){col=0;y+=fh+gap;}
     });
     if(col!==0)y+=fh+gap;
+    y+=2;
+  }
+  function drawFotosPDF(){
+    var pecaFotos=[],ponteiras=[],furos=[],desenhos=[];
+    function _fde(x){ return (typeof x==='string')?x:(x&&x.foto)||''; }
+    (d.pecas||[]).forEach(function(p){
+      (p.fotosPeca||[]).forEach(function(f){if(f)pecaFotos.push(f);});
+      (p.ponteiras||[]).forEach(function(x){var f=_fde(x);if(f)ponteiras.push(f);});
+      (p.furos||[]).forEach(function(x){var f=_fde(x);if(f)furos.push(f);});
+      if(p.desenhoFoto)desenhos.push(p.desenhoFoto);
+    });
+    var gerais=(d.fotos||[]).filter(function(f){return !!f;});
+    _galeria('FOTOS DAS PEÇAS',pecaFotos);
+    _galeria('FOTOS DAS PONTEIRAS',ponteiras);
+    _galeria('FOTOS DO FURO DE CENTRO',furos);
+    _galeria('DESENHOS',desenhos);
+    _galeria('OUTRAS FOTOS',gerais);
   }
   header();
   infoBlocos();
@@ -1896,7 +1911,22 @@ function carregarParaEditar(id){
   });
   fotos=(d.fotos&&Array.isArray(d.fotos))?d.fotos.slice():[];renderFotos();
   initSecoes(); modoAdmissao(d.etapa,d.jaEnviado);
+  // busca as fotos na nuvem e mostra dentro do formulário (caso este aparelho ainda não tenha)
+  if(typeof _comFotosDaNuvem==='function'){ _comFotosDaNuvem(Object.assign({},d,{pecas:(d.pecas||[]).map(function(p){return Object.assign({},p);})}), _reaplicarFotosForm); }
   window.scrollTo(0,0);toast('Editando — altere e toque em Enviar');
+}
+// aplica no formulário aberto as fotos vindas da nuvem
+function _reaplicarFotosForm(dd){
+  if(!dd)return;
+  if(dd.fotos&&dd.fotos.length){ fotos=dd.fotos.slice(); renderFotos(); }
+  var pes=document.querySelectorAll('.peca');
+  (dd.pecas||[]).forEach(function(p,i){
+    var pe=pes[i]; if(!pe)return; var pid=+pe.id.split('-')[1]; var st=pecasState[pid]; if(!st)return;
+    if(p.fotosPeca&&p.fotosPeca.length){ st.fotosPeca=p.fotosPeca.slice(); renderPecaFotos(pid); }
+    if(p.desenhoFoto&&!st.desenhoFoto){ st.desenhoFoto=p.desenhoFoto; renderDesenho(pid); }
+    if(p.ponteiras&&st.pt&&st.pt.length){ p.ponteiras.forEach(function(x,j){ if(st.pt[j]&&x&&x.foto&&!st.pt[j].foto)st.pt[j].foto=x.foto; }); renderSubList(pid,'pt'); }
+    if(p.furos&&st.fc&&st.fc.length){ p.furos.forEach(function(x,j){ if(st.fc[j]&&x&&x.foto&&!st.fc[j].foto)st.fc[j].foto=x.foto; }); renderSubList(pid,'fc'); }
+  });
 }
 
 // ============ UI ============
