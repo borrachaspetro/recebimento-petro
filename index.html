@@ -27,17 +27,17 @@
     .wrap{max-width:1180px;padding:18px 24px}
     .footer-bar .max{max-width:1180px}
     .tablink{max-width:1180px;margin:0 auto}
-    #view-novo .wrap{display:grid;grid-template-columns:255px 1fr;column-gap:24px;align-items:start}
+    #view-novo .wrap{display:grid;grid-template-columns:236px 1fr;column-gap:22px;align-items:start}
     #view-novo #admToggle{grid-column:2}
     #view-novo #secNav{grid-column:1;grid-row:1 / 999;position:sticky;top:74px;display:flex;flex-direction:column;gap:6px}
-    #view-novo .wrap > .card{grid-column:2;margin-bottom:0;display:none}
+    #view-novo .wrap > .card{grid-column:2;margin-bottom:0;display:none;max-width:880px}
     #view-novo .wrap > .card.ativa{display:block}
     #view-novo .card h2{cursor:default}
-    .navitem{display:flex;align-items:center;gap:9px;text-align:left;background:#fff;border:1px solid var(--borda);border-radius:10px;padding:11px 12px;font-weight:700;font-size:13px;color:#333;cursor:pointer;transition:background .12s}
-    .navitem:hover{background:#f6f6f6}
-    .navitem .nnum{background:var(--cinza2);color:#000;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;flex:none}
-    .navitem.on{background:var(--preto);color:var(--amarelo);border-color:#000}
-    .navitem.on .nnum{background:var(--amarelo);color:#000}
+    .navitem{display:flex;align-items:center;gap:9px;text-align:left;background:var(--preto);border:1px solid #000;border-radius:10px;padding:10px 12px;font-weight:800;font-size:13px;color:var(--amarelo);cursor:pointer;transition:.12s}
+    .navitem:hover{background:#242424}
+    .navitem .nnum{background:var(--amarelo);color:#000;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+    .navitem.on{background:var(--amarelo);color:#000;border-color:var(--amarelo);box-shadow:0 2px 7px rgba(0,0,0,.18)}
+    .navitem.on .nnum{background:#000;color:var(--amarelo)}
     .navitem.hide{display:none}
   }
   .card{background:#fff;border:1px solid var(--borda);border-radius:14px;margin-bottom:14px;overflow:hidden}
