@@ -20,16 +20,25 @@
   header p{margin:2px 0 0;font-size:11px;opacity:.75}
   header .cod{margin-left:auto;background:var(--amarelo);color:#000;font-weight:800;font-size:11px;padding:4px 8px;border-radius:6px}
   .wrap{max-width:680px;margin:0 auto;padding:14px}
-  /* --- layout largo no computador (tela cheia) + menu accordion --- */
+  /* --- computador: menu lateral + painel ao lado --- */
+  #secNav{display:none}
   @media(min-width:900px){
     body{font-size:15px}
-    .wrap{max-width:1100px;padding:18px 26px}
-    .footer-bar .max{max-width:1100px}
-    .tablink{max-width:1100px;margin:0 auto}
-    #view-novo .card h2{cursor:pointer;user-select:none}
-    #view-novo .card h2::after{content:'▾';margin-left:auto;font-size:12px;opacity:.75}
-    #view-novo .card.collapsed h2::after{content:'▸'}
-    #view-novo .card.collapsed .body{display:none}
+    .wrap{max-width:1180px;padding:18px 24px}
+    .footer-bar .max{max-width:1180px}
+    .tablink{max-width:1180px;margin:0 auto}
+    #view-novo .wrap{display:grid;grid-template-columns:255px 1fr;column-gap:24px;align-items:start}
+    #view-novo #admToggle{grid-column:2}
+    #view-novo #secNav{grid-column:1;grid-row:1 / 999;position:sticky;top:74px;display:flex;flex-direction:column;gap:6px}
+    #view-novo .wrap > .card{grid-column:2;margin-bottom:0;display:none}
+    #view-novo .wrap > .card.ativa{display:block}
+    #view-novo .card h2{cursor:default}
+    .navitem{display:flex;align-items:center;gap:9px;text-align:left;background:#fff;border:1px solid var(--borda);border-radius:10px;padding:11px 12px;font-weight:700;font-size:13px;color:#333;cursor:pointer;transition:background .12s}
+    .navitem:hover{background:#f6f6f6}
+    .navitem .nnum{background:var(--cinza2);color:#000;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+    .navitem.on{background:var(--preto);color:var(--amarelo);border-color:#000}
+    .navitem.on .nnum{background:var(--amarelo);color:#000}
+    .navitem.hide{display:none}
   }
   .card{background:#fff;border:1px solid var(--borda);border-radius:14px;margin-bottom:14px;overflow:hidden}
   .card h2{margin:0;background:var(--preto);color:var(--amarelo);font-size:12.5px;font-weight:800;
@@ -163,6 +172,7 @@
   <div id="admToggle" class="hide" style="margin-bottom:12px">
     <button class="btn btn-sec" style="width:100%;font-weight:700" onclick="toggleAdm()"><span id="admToggleTxt">▸ Mostrar dados da admissão</span></button>
   </div>
+  <div id="secNav"></div>
 
   <!-- 1. RECEBIMENTO -->
   <div class="card">
@@ -1898,35 +1908,48 @@ function verTab(t){
   document.getElementById('tab-lista').classList.toggle('on',t==='lista');
   if(t==='lista')renderSaved();
 }
-// ---- accordion (só no computador) + ocultar dados da admissão p/ comercial/orçamento ----
+// ---- computador: MENU LATERAL + painel ao lado. celular: linear (não muda). ----
+function _cards(){ return [].slice.call(document.querySelectorAll('#view-novo > .wrap > .card')); }
 // cards da admissão = os que ficam ANTES do card de peças (1 a 6). Peças(7), Fotos(8) e Obs(9) ficam visíveis.
 function _cardsAdmissao(){
-  var all=[].slice.call(document.querySelectorAll('#view-novo > .wrap > .card'));
+  var all=_cards();
   var pcs=document.getElementById('pecas'), pcard=pcs&&pcs.closest('.card');
   var idx=pcard?all.indexOf(pcard):-1;
   return idx>0?all.slice(0,idx):all.filter(function(c){return !c.querySelector('#pecas');});
 }
+function buildNav(){
+  var nav=document.getElementById('secNav'); if(!nav)return;
+  nav.innerHTML=_cards().map(function(c,i){
+    var h=c.querySelector('h2'); var nn=h?h.querySelector('.n'):null; var num=nn?nn.textContent.trim():(''+(i+1));
+    var title=h?(h.textContent||'').replace(num,'').trim():('Seção '+(i+1));
+    return '<button type="button" class="navitem" data-i="'+i+'" onclick="irSecao('+i+')"><span class="nnum">'+num+'</span>'+title+'</button>';
+  }).join('');
+}
+function irSecao(i){
+  _cards().forEach(function(c,j){ c.classList.toggle('ativa', j===i); });
+  document.querySelectorAll('#secNav .navitem').forEach(function(b){ b.classList.toggle('on', (+b.dataset.i)===i); });
+}
 let _admAberto=true;
 function _aplicaAdm(){
-  _cardsAdmissao().forEach(function(c){ c.style.display=_admAberto?'':'none'; });
-  var t=document.getElementById('admToggleTxt'); if(t)t.textContent=_admAberto?'▾ Ocultar dados da admissão':'▸ Mostrar dados da admissão (cliente, NF, embalagem…)';
+  var mostrar=_admAberto, admCount=_cardsAdmissao().length;
+  _cardsAdmissao().forEach(function(c){ c.style.display=mostrar?'':'none'; }); // celular: esconde/mostra 1-6
+  document.querySelectorAll('#secNav .navitem').forEach(function(b){ if((+b.dataset.i)<admCount) b.classList.toggle('hide',!mostrar); }); // desktop: esconde itens 1-6 do menu
+  var t=document.getElementById('admToggleTxt'); if(t)t.textContent=mostrar?'▾ Ocultar dados da admissão':'▸ Mostrar dados da admissão (cliente, NF, embalagem…)';
 }
 function toggleAdm(){ _admAberto=!_admAberto; _aplicaAdm(); }
 function modoAdmissao(etapa,enviado){
   var oculta=!!enviado&&(etapa==='comercial'||etapa==='orcamento');
   var tg=document.getElementById('admToggle'); if(tg)tg.classList.toggle('hide',!oculta);
   _admAberto=!oculta; _aplicaAdm();
-  if(oculta){ // deixa Peças(7), Fotos(8) e Obs(9) visíveis e ABERTAS
-    var adm=_cardsAdmissao();
-    [].slice.call(document.querySelectorAll('#view-novo > .wrap > .card')).forEach(function(c){
-      if(adm.indexOf(c)<0) c.classList.remove('collapsed');
-    });
-  }
+  if(oculta&&window.innerWidth>=900) irSecao(_cardsAdmissao().length); // desktop: abre direto nas Peças
 }
-function toggleSecao(h2){ if(window.innerWidth<900)return; var c=h2.closest('.card'); if(c)c.classList.toggle('collapsed'); }
 function initSecoes(){
-  var desk=window.innerWidth>=900;
-  document.querySelectorAll('#view-novo > .wrap > .card').forEach(function(c){ c.classList.toggle('collapsed', desk); });
+  buildNav();
+  if(window.innerWidth>=900){
+    if(!document.querySelector('#view-novo .card.ativa')) irSecao(0);
+  }else{
+    _cards().forEach(function(c){ c.classList.remove('ativa'); });
+  }
 }
 function limparForm(ask){
   if(ask&&!confirm('Limpar o formulário?'))return;
@@ -2000,12 +2023,11 @@ document.getElementById('data').valueAsDate=new Date();
 if(OPERADOR)document.getElementById('resp').value=OPERADOR;
 document.getElementById('cliente').addEventListener('change',_preencheCliente);
 document.getElementById('cliente').addEventListener('blur',_preencheCliente);
-// accordion no computador: cada seção abre ao clicar no título (roda cedo, antes das partes pesadas)
+// menu lateral no computador (roda cedo, antes das partes pesadas)
 try{
-  document.querySelectorAll('#view-novo .card h2').forEach(function(h){ h.addEventListener('click',function(){toggleSecao(h);}); });
   initSecoes();
   window.addEventListener('resize',initSecoes);
-}catch(e){console.warn('accordion',e);}
+}catch(e){console.warn('menu',e);}
 _limparFotosAntigas(30);
 renderSaved();
 addPeca();
