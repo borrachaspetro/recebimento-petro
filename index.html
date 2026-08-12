@@ -1705,8 +1705,9 @@ function filtrarLista(){
     const etapaLbl={admissao:'Admissão',comercial:'Comercial',orcamento:'Orçamento'}[etapa]||'Comercial';
     const cor={admissao:['#FDE2E1','#C0392B'],comercial:['#FCF3CF','#8a6d00'],orcamento:['#D6EAF8','#1F618D']}[etapa]||['#FCF3CF','#8a6d00'];
     const badge=concl?'<span class="badge" style="background:#D1F2EB;color:#0E6655">✓ Concluído</span>':('<span class="badge" style="background:'+cor[0]+';color:'+cor[1]+'">● Pendente '+etapaLbl+'</span>');
-    const _np=(d.pecas?d.pecas.length:0);
-    const _tq=(d.pecas||[]).reduce((s,p)=>s+(parseInt(p&&p.qtde,10)||0),0);
+    const _plist=Array.isArray(d.pecas)?d.pecas:[];
+    const _np=_plist.length;
+    const _tq=_plist.reduce((s,p)=>s+(parseInt(p&&p.qtde,10)||0),0);
     const _pcs=_np+' item(ns)'+(_tq?(' · '+_tq+' pç'):'');
     return `<div class="saved-item">
       <div style="flex:1;min-width:0"><b>${d.cliente||'—'}</b> ${d.nf?('· NF '+d.nf):''} ${badge}<br>
@@ -1867,7 +1868,13 @@ function verTab(t){
   if(t==='lista')renderSaved();
 }
 // ---- accordion (só no computador) + ocultar dados da admissão p/ comercial/orçamento ----
-function _cardsAdmissao(){ return [].slice.call(document.querySelectorAll('#view-novo > .wrap > .card')).filter(function(c){return !c.querySelector('#pecas');}); }
+// cards da admissão = os que ficam ANTES do card de peças (1 a 6). Peças(7), Fotos(8) e Obs(9) ficam visíveis.
+function _cardsAdmissao(){
+  var all=[].slice.call(document.querySelectorAll('#view-novo > .wrap > .card'));
+  var pcs=document.getElementById('pecas'), pcard=pcs&&pcs.closest('.card');
+  var idx=pcard?all.indexOf(pcard):-1;
+  return idx>0?all.slice(0,idx):all.filter(function(c){return !c.querySelector('#pecas');});
+}
 let _admAberto=true;
 function _aplicaAdm(){
   _cardsAdmissao().forEach(function(c){ c.style.display=_admAberto?'':'none'; });
@@ -1878,8 +1885,12 @@ function modoAdmissao(etapa,enviado){
   var oculta=!!enviado&&(etapa==='comercial'||etapa==='orcamento');
   var tg=document.getElementById('admToggle'); if(tg)tg.classList.toggle('hide',!oculta);
   _admAberto=!oculta; _aplicaAdm();
-  var pcs=document.getElementById('pecas'), pcard=pcs&&pcs.closest('.card');
-  if(oculta&&pcard)pcard.classList.remove('collapsed'); // deixa as peças abertas
+  if(oculta){ // deixa Peças(7), Fotos(8) e Obs(9) visíveis e ABERTAS
+    var adm=_cardsAdmissao();
+    [].slice.call(document.querySelectorAll('#view-novo > .wrap > .card')).forEach(function(c){
+      if(adm.indexOf(c)<0) c.classList.remove('collapsed');
+    });
+  }
 }
 function toggleSecao(h2){ if(window.innerWidth<900)return; var c=h2.closest('.card'); if(c)c.classList.toggle('collapsed'); }
 function initSecoes(){
@@ -1958,14 +1969,16 @@ document.getElementById('data').valueAsDate=new Date();
 if(OPERADOR)document.getElementById('resp').value=OPERADOR;
 document.getElementById('cliente').addEventListener('change',_preencheCliente);
 document.getElementById('cliente').addEventListener('blur',_preencheCliente);
+// accordion no computador: cada seção abre ao clicar no título (roda cedo, antes das partes pesadas)
+try{
+  document.querySelectorAll('#view-novo .card h2').forEach(function(h){ h.addEventListener('click',function(){toggleSecao(h);}); });
+  initSecoes();
+  window.addEventListener('resize',initSecoes);
+}catch(e){console.warn('accordion',e);}
 _limparFotosAntigas(30);
 renderSaved();
 addPeca();
 atualizarClientes();
-// accordion no computador: cada seção abre ao clicar no título
-document.querySelectorAll('#view-novo .card h2').forEach(function(h){ h.addEventListener('click',function(){toggleSecao(h);}); });
-initSecoes();
-window.addEventListener('resize',initSecoes);
 </script>
 
 <!-- ════════ SYNC EM TEMPO REAL — FIREBASE (Petro) ════════
