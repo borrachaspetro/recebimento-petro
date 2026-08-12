@@ -1704,6 +1704,7 @@ function _preencheCliente(){
 function renderSaved(){
   const all=JSON.parse(localStorage.getItem('petro_receb')||'[]');
   renderFromArray(all,'Deste aparelho',true);
+  if(typeof _fotosGarantirNuvem==='function') _fotosGarantirNuvem(all); // garante que as fotos deste aparelho subiram p/ todos
   if(SHEET_URL) carregarNuvem();
 }
 function carregarNuvem(){
@@ -2259,16 +2260,41 @@ atualizarClientes();
     }
     return out;
   }
+  // ---- Fila de envio das fotos (à prova de falha: retenta até subir p/ todos) ----
+  var _fila={};                                   // id -> registro com fotos aguardando subir
+  function _syncSet(){ try{ return JSON.parse(localStorage.getItem('petro_fotos_sync')||'[]'); }catch(e){ return []; } }
+  function _marcaSync(id){ try{ var s=_syncSet(); if(s.indexOf(String(id))<0){ s.push(String(id)); localStorage.setItem('petro_fotos_sync',JSON.stringify(s)); } }catch(e){} }
+  function _subirUm(id){
+    var d=_fila[id]; if(!d) return;
+    var ref=_col().doc(String(id)), novo=_extrair(d);
+    ref.get().then(function(snap){
+      var base={fotos:[],pecas:[]};
+      if(snap&&snap.exists){ var data=snap.data(); if(data&&data.payload){ try{ base=JSON.parse(data.payload); }catch(e){} } }
+      ref.set({payload:JSON.stringify(_mergeFotos(base,novo)),updatedAt:Date.now()})
+        .then(function(){ delete _fila[id]; _marcaSync(id); }).catch(function(){});
+    }).catch(function(){
+      ref.set({payload:JSON.stringify(novo),updatedAt:Date.now()})
+        .then(function(){ delete _fila[id]; _marcaSync(id); }).catch(function(){});
+    });
+  }
+  function _flush(){ if(!_fbOn()) return; Object.keys(_fila).forEach(_subirUm); }
+  setInterval(_flush, 12000);                      // re-tenta o que ficou pendente
+  if(typeof window!=='undefined') window.addEventListener('online', _flush);
+
   window._fotosEnviarNuvem=function(d){
     try{
-      if(!_fbOn()||!d||d.id==null) return;
-      if(!_temFotos(d)) return;
-      var ref=_col().doc(String(d.id)), novo=_extrair(d);
-      ref.get().then(function(snap){
-        var base={fotos:[],pecas:[]};
-        if(snap&&snap.exists){ var data=snap.data(); if(data&&data.payload){ try{ base=JSON.parse(data.payload); }catch(e){} } }
-        ref.set({payload:JSON.stringify(_mergeFotos(base,novo)),updatedAt:Date.now()}).catch(function(){});
-      }).catch(function(){ ref.set({payload:JSON.stringify(novo),updatedAt:Date.now()}).catch(function(){}); });
+      if(!d||d.id==null||!_temFotos(d)) return;
+      _fila[String(d.id)]=d;                        // entra na fila e sobe (com retentativa)
+      _flush();
+    }catch(e){}
+  };
+  // ao abrir/atualizar a lista, reenfileira fichas com fotos que ainda não confirmaram subida
+  window._fotosGarantirNuvem=function(arr){
+    try{
+      if(!arr||!arr.length) return;
+      var s=_syncSet();
+      arr.forEach(function(d){ if(d&&d.id!=null&&_temFotos(d)&&s.indexOf(String(d.id))<0){ _fila[String(d.id)]=d; } });
+      _flush();
     }catch(e){}
   };
   window._comFotosDaNuvem=function(d,cb){
@@ -2276,7 +2302,7 @@ atualizarClientes();
       if(_temFotos(d)){ cb(d); return; }         // já tenho as fotos localmente
       if(!_fbOn()){ cb(d); return; }
       var done=false, fim=function(){ if(done)return; done=true; cb(d); };
-      var t=setTimeout(fim,5000);
+      var t=setTimeout(fim,8000);
       _col().doc(String(d.id)).get().then(function(snap){
         clearTimeout(t);
         if(snap&&snap.exists){ var data=snap.data(); if(data&&data.payload){ try{ _aplicar(d,JSON.parse(data.payload)); }catch(e){} } }
