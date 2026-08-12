@@ -84,8 +84,13 @@
     font-size:12.5px;margin-bottom:13px;line-height:1.45}
   .alert b{display:block;margin-bottom:3px}
   .peca{border:1.5px solid var(--cinza2);border-radius:12px;padding:12px;margin-bottom:14px;background:#fbfbfb}
-  .peca .ph{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-  .peca .ph b{font-size:14px}
+  .peca .ph{display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer}
+  .peca .ph b{font-size:14px;flex:none}
+  .peca .ph .resumo{flex:1;min-width:0;font-weight:400;font-size:12px;color:#777;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .peca .ph .ct{font-size:12px;opacity:.7;flex:none}
+  .peca.collapsed{background:#fff}
+  .peca.collapsed > *:not(.ph){display:none}
+  .peca.collapsed .ph{margin-bottom:0}
   .peca .rm{background:#fdecea;color:var(--vermelho);border:none;border-radius:8px;padding:6px 10px;font-weight:800;font-size:12px;cursor:pointer}
   .addpeca{width:100%;border:2px dashed var(--amarelo2);background:#fffdf2;color:#9a7d00;border-radius:11px;
     padding:13px;font-size:14px;font-weight:800;cursor:pointer;margin-bottom:6px}
@@ -514,7 +519,8 @@ function addPeca(){
   const div=document.createElement('div');
   div.className='peca'; div.id='peca-'+id;
   div.innerHTML=`
-    <div class="ph"><b>Peça ${document.querySelectorAll('.peca').length+1}</b>
+    <div class="ph" onclick="togglePeca(this,event)"><b>Peça ${document.querySelectorAll('.peca').length+1}</b>
+      <span class="resumo"></span><span class="ct">▾</span>
       <button class="rm" onclick="rmPeca(${id})">Remover</button></div>
 
     <div class="grp">Chegou com ou sem revestimento? <span style="color:var(--vermelho)">*</span></div>
@@ -778,6 +784,24 @@ function addPeca(){
       if(nome==='Outros'){ const of=div.querySelector('.p_acessoutros'); if(of)of.classList.toggle('hide',!c.classList.contains('on')); }
     };
   });
+  // accordion de peças: com mais de uma, recolhe as anteriores e deixa a nova aberta
+  var _tds=document.querySelectorAll('.peca');
+  if(_tds.length>1){ _tds.forEach(function(pc){ if(pc!==div){ pc.classList.add('collapsed'); var ct=pc.querySelector('.ct'); if(ct)ct.textContent='▸'; _resumoPeca(pc); } }); }
+}
+function togglePeca(ph,e){
+  if(e&&e.target&&e.target.closest&&e.target.closest('.rm'))return; // clicar em Remover não recolhe
+  var pc=ph.closest('.peca'); if(!pc)return;
+  pc.classList.toggle('collapsed');
+  var ct=ph.querySelector('.ct'); if(ct)ct.textContent=pc.classList.contains('collapsed')?'▸':'▾';
+  if(pc.classList.contains('collapsed'))_resumoPeca(pc);
+}
+function _resumoPeca(pc){
+  var r=pc.querySelector('.resumo'); if(!r)return;
+  var g=function(cls){var el=pc.querySelector('.'+cls);return el?el.value.trim():'';};
+  var cbOn=pc.querySelector('.cbseg button.on'); var cb=cbOn?cbOn.textContent.trim():'';
+  var parts=[]; var prod=g('p_produto'); var qt=g('p_qtde');
+  if(prod)parts.push(prod); if(qt)parts.push('Qtde '+qt); if(cb)parts.push(cb);
+  r.textContent=parts.length?('— '+parts.join(' · ')):'';
 }
 function rmPeca(id){
   if(document.querySelectorAll('.peca').length<=1){toast('Precisa de ao menos 1 peça');return;}
