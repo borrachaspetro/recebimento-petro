@@ -524,7 +524,7 @@ const SUBQ={pt:['Quebrada','Gasta','Solta','Arranhada','Outros'], fc:['Furo dani
 const SUBLBL={pt:'Ponteira', fc:'Furo de centro'};
 function addPeca(){
   const id=++pecaSeq;
-  pecasState[id]={cb:'',visual:{},acab:'',acabSet:new Set(),acessSN:'',acessSet:new Set(),
+  pecasState[id]={cb:'',tipo:'',visual:{},acab:'',acabSet:new Set(),acessSN:'',acessSet:new Set(),
     ptSN:'',fcSN:'',pt:[],fc:[],estado:'',desenhoSN:'',desenhoFoto:'',fotosPeca:[]};
   const div=document.createElement('div');
   div.className='peca'; div.id='peca-'+id;
@@ -652,11 +652,27 @@ function addPeca(){
       <div class="acessQtds"></div>
     </div>
 
+    <div class="grp">Tipo de peça <span style="color:var(--vermelho)">*</span></div>
+    <select class="p_tipo">
+      <option value="">Selecione…</option>
+      <option>Roda</option>
+      <option>Eixo</option>
+      <option>Tubo</option>
+      <option>Rolete</option>
+      <option>Chapa</option>
+      <option>Tanque</option>
+      <option>Anel</option>
+      <option>Matriz</option>
+      <option>Molde</option>
+    </select>
+    <div class="hint" style="margin-top:2px">Eixo → pede ponteiras e furo de centro. Outros tipos → só a foto da peça.</div>
+
     <label>Peso da peça recebida (kg)</label>
     <input type="text" inputmode="decimal" class="p_peso">
 
     <div class="grp">Inspeção visual</div>
 
+    <div class="eixoInsp hide" id="eixoInsp-${id}">
     <div class="grp" style="color:#333">Ponteira</div>
     <div class="seg ptseg" data-pid="${id}">
       <button data-v="Conforme">Conforme</button>
@@ -680,6 +696,7 @@ function addPeca(){
       <div class="fcList" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start"></div>
       <button type="button" class="addsub" onclick="subAdd(${id},'fc')">＋ Adicionar foto</button>
     </div>
+    </div><!-- /eixoInsp -->
 
     <div class="grp" style="color:#333">Estado geral</div>
     <div class="chips" style="margin-bottom:0">
@@ -724,6 +741,19 @@ function addPeca(){
       if(b.dataset.v==='Sim') renderDesenho(id);
     };
   });
+  // tipo de peça → só "Eixo" mostra ponteira/furo; os outros tipos usam só a foto da peça
+  const _tipoSel=div.querySelector('.p_tipo');
+  if(_tipoSel){ _tipoSel.onchange=()=>{
+    pecasState[id].tipo=_tipoSel.value;
+    const eixo=(_tipoSel.value==='Eixo');
+    const box=document.getElementById('eixoInsp-'+id); if(box)box.classList.toggle('hide',!eixo);
+    if(!eixo){
+      pecasState[id].ptSN='';pecasState[id].fcSN='';pecasState[id].pt=[];pecasState[id].fc=[];
+      div.querySelectorAll('.ptseg button,.fcseg button').forEach(x=>x.classList.remove('on','ok','bad'));
+      ['ptCons','fcCons','ptBox','fcBox'].forEach(pfx=>{const e=document.getElementById(pfx+'-'+id);if(e)e.classList.add('hide');});
+    }
+    _resumoPeca(div);
+  }; }
   // inspeção: ponteira / furo (Conforme / Não conforme → precisa conserto + registros)
   [['ptseg','pt','ptBox','ptCons'],['fcseg','fc','fcBox','fcCons']].forEach(cfg=>{
     div.querySelectorAll('.'+cfg[0]+' button').forEach(b=>{
@@ -811,8 +841,9 @@ function _resumoPeca(pc){
   var r=pc.querySelector('.resumo'); if(!r)return;
   var g=function(cls){var el=pc.querySelector('.'+cls);return el?el.value.trim():'';};
   var cbOn=pc.querySelector('.cbseg button.on'); var cb=cbOn?cbOn.textContent.trim():'';
+  var tsel=pc.querySelector('.p_tipo'); var tipo=tsel?tsel.value:'';
   var parts=[]; var prod=g('p_produto'); var qt=g('p_qtde');
-  if(prod)parts.push(prod); if(qt)parts.push('Qtde '+qt); if(cb)parts.push(cb);
+  if(tipo)parts.push(tipo); if(prod)parts.push(prod); if(qt)parts.push('Qtde '+qt); if(cb)parts.push(cb);
   r.textContent=parts.length?('— '+parts.join(' · ')):'';
 }
 function rmPeca(id){
@@ -996,6 +1027,7 @@ function coletarPecas(){
     const fcResumo = fcSN==='Não conforme' ? ('Não conforme — precisa conserto'+(fcArr.length?(' ('+fcArr.map(_dlbl).join(', ')+')'):'')) : (fcSN||'');
     out.push({
       cb:pecasState[id].cb,
+      tipo:pecasState[id].tipo||'',
       dint:g('p_dint'),dextsol:g('p_dextsol'),dextmed:g('p_dextmed'),areautil:g('p_areautil'),
       compsol:g('p_compsol'),compmed:g('p_compmed'),produto:g('p_produto'),
       qtde:g('p_qtde'),durmed:g('p_durmed'),dursol:g('p_dursol'),
@@ -1058,13 +1090,16 @@ function salvarFicha(enviarDepois){
     else if(st.acessSN==='Sim'){
       if(!st.acessSet||st.acessSet.size===0)erros.push(n+'escolher o acessório');
     }
-    if(!st.ptSN)erros.push(n+'Ponteira (Conforme/Não conforme)');
-    else{
-      if(!editId && !(st.pt&&st.pt.some(x=>x.foto)))erros.push(n+'Foto da ponteira (obrigatória)');
-      if(st.ptSN==='Não conforme'&&st.pt) st.pt.forEach((x,i)=>{if(!x.q)erros.push(n+'classificar o defeito da ponteira '+(i+1));});
+    if(!st.tipo)erros.push(n+'Tipo de peça');
+    if(st.tipo==='Eixo'){
+      if(!st.ptSN)erros.push(n+'Ponteira (Conforme/Não conforme)');
+      else{
+        if(!editId && !(st.pt&&st.pt.some(x=>x.foto)))erros.push(n+'Foto da ponteira (obrigatória)');
+        if(st.ptSN==='Não conforme'&&st.pt) st.pt.forEach((x,i)=>{if(!x.q)erros.push(n+'classificar o defeito da ponteira '+(i+1));});
+      }
+      if(!st.fcSN)erros.push(n+'Furo de centro (Conforme/Não conforme)');
+      else if(st.fcSN==='Não conforme'&&st.fc) st.fc.forEach((x,i)=>{if(!x.q)erros.push(n+'classificar o defeito do furo '+(i+1));});
     }
-    if(!st.fcSN)erros.push(n+'Furo de centro (Conforme/Não conforme)');
-    else if(st.fcSN==='Não conforme'&&st.fc) st.fc.forEach((x,i)=>{if(!x.q)erros.push(n+'classificar o defeito do furo '+(i+1));});
     if(!st.estado)erros.push(n+'Estado geral');
     if(!editId && !(st.fotosPeca&&st.fotosPeca.length))erros.push(n+'Foto da peça (obrigatória)'); // obrigatório só em recebimentos novos
   });
@@ -1402,6 +1437,7 @@ function gerarPDFdoc(d){
     var cand=[
       {h:'Nº',w:7,always:true,g:function(p,i){return String(i+1);}},
       {h:'Revest.',w:13,g:function(p){return p.cb==='S/B'?'Sem':(p.cb==='C/B'?'Com':'');}},
+      {h:'Tipo',w:14,g:function(p){return p.tipo||'';}},
       {h:'Peso peça (kg)',w:13,g:function(p){return p.peso||'';}},
       {h:'Ø int',w:14,g:function(p){return p.dint||'';}},
       {h:'Ø ext sol',w:15,g:function(p){return p.dextsol||'';}},
@@ -1775,7 +1811,7 @@ function filtrarLista(){
         <button class="ic" title="Ver PDF do relatório" style="color:#C0392B;font-weight:800;font-size:12px" onclick="verPDF('${d.id}')">PDF</button>
         <button class="ic" title="Salvar / sincronizar (sem enviar)" onclick="salvarLinha('${d.id}')">💾</button>
         <button class="ic" title="Enviar por e-mail" style="color:#1F618D;font-weight:800" onclick="openEnviar('${d.id}')">📧</button>
-        ${!concl?`<button class="ic icok" title="Concluir (atendido)" onclick="marcarAtendido('${d.id}')">✔️</button>`:''}
+        ${concl?`<button class="ic" title="Reabrir (voltar para pendente)" onclick="reabrir('${d.id}')">↩️</button>`:`<button class="ic icok" title="Concluir (atendido)" onclick="marcarAtendido('${d.id}')">✔️</button>`}
         <button class="ic icdel" title="Excluir" onclick="excluirRec('${d.id}')">🗑</button>
       </div></div>`;
   }).join('');
@@ -1821,6 +1857,16 @@ function marcarAtendido(id){
   if(SHEET_URL)postSheet(SHEET_URL,{action:'status',id:id,status:'Atendido'});
   renderFromArray(LISTA_ATUAL,document.getElementById('origemLbl').textContent,ACOES_ATUAL);toast('Marcado como atendido');
 }
+function reabrir(id){
+  if(!confirm('Reabrir este recebimento? Ele volta para PENDENTE (desmarca o Concluído).'))return;
+  let arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');
+  arr.forEach(a=>{if(String(a.id)===String(id)){a.status='Pendente';a.atendidoEm='';a.updatedAt=Date.now();}});
+  try{localStorage.setItem('petro_receb',JSON.stringify(arr));}catch(e){}
+  LISTA_ATUAL.forEach(a=>{if(String(a.id)===String(id)){a.status='Pendente';a.atendidoEm='';}});
+  if(SHEET_URL)postSheet(SHEET_URL,{action:'status',id:id,status:'Pendente'});
+  if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
+  renderFromArray(LISTA_ATUAL,document.getElementById('origemLbl').textContent,ACOES_ATUAL);toast('Reaberto — voltou para pendente');
+}
 function setV(id,v){const e=document.getElementById(id);if(e)e.value=v||'';}
 function descPart(s){const p=(s||'').split(' — ');return p.length>1?p.slice(1).join(' — '):'';}
 function selSeg(id,v){if(!v)return;const b=[].slice.call(document.querySelectorAll('#'+id+' button')).find(x=>x.dataset.v===v);if(b)b.click();}
@@ -1857,6 +1903,7 @@ function carregarParaEditar(id){
     set('p_compsol',p.compsol);set('p_compmed',p.compmed);set('p_produto',p.produto);
     set('p_qtde',p.qtde);set('p_durmed',p.durmed);set('p_dursol',p.dursol);set('p_peso',p.peso);
     set('p_molde',p.molde);set('p_formula',p.formula);set('p_pesoorc',p.pesoOrc);set('p_preco',p.preco);
+    if(p.tipo){const _ts=pe.querySelector('.p_tipo');if(_ts){_ts.value=p.tipo;_ts.dispatchEvent(new Event('change'));}}
     if(p.cb){const b=[].slice.call(pe.querySelectorAll('.cbseg button')).find(x=>x.dataset.v===p.cb);if(b)b.click();}
     // ---- acabamento ----
     if(p.acab){const b=[].slice.call(pe.querySelectorAll('.acabseg button')).find(x=>x.dataset.v===p.acab);if(b)b.click();}
