@@ -1716,6 +1716,7 @@ function carregarNuvem(){
       var map={}; cloud.forEach(function(r){if(r&&r.id!=null)map[String(r.id)]=r;});
       local.forEach(function(r){if(r&&r.id!=null)map[String(r.id)]=r;});
       var merged=Object.keys(map).map(function(k){return map[k];});
+      if(typeof window._ingestSheet==='function') window._ingestSheet(cloud); // grava os da planilha na memória e sobe p/ o Firebase
       renderFromArray(merged,'Planilha · todos os aparelhos',true);
     }catch(e){}
     delete window[cb]; const s2=document.getElementById(cb+'_s'); if(s2)s2.remove();};
@@ -2171,10 +2172,29 @@ atualizarClientes();
   }
   function _fbEnviar(){
     if(!_fbReady) return;
-    var receb=_getReceb();
-    if(!receb.length && !_getTumbas().length) return; // nunca grava vazio
-    fdoc.set({ payload: JSON.stringify({ receb:_semFotos(receb), _tumbas:_getTumbas() }), updatedAt: Date.now() })
-      .catch(function(e){ console.warn('[Firebase] envio erro', e); });
+    var receb=_getReceb(), tumbasL=_getTumbas();
+    if(!receb.length && !tumbasL.length) return; // nunca grava vazio
+    // LER → MESCLAR → GRAVAR: nunca sobrescreve o que já está na nuvem com dados velhos
+    // (era isto que "congelava" a nuvem: um aparelho com memória cheia/atrasado regravava por cima)
+    fdoc.get().then(function(snap){
+      var remote={receb:[],_tumbas:[]};
+      if(snap && snap.exists){ var dd=snap.data(); if(dd&&dd.payload){ try{ remote=JSON.parse(dd.payload); }catch(e){} } }
+      var tumbas=tumbasL.concat(remote._tumbas||[]);
+      var mergedReceb=_mesclar(receb, remote.receb||[], tumbas);
+      var seen={}, mergedTumbas=[];
+      tumbas.forEach(function(t){ if(t&&t.id!=null){ var k=t.id+'|'+t.ts; if(!seen[k]){ seen[k]=1; mergedTumbas.push(t); } } });
+      _preservarFotos(receb, mergedReceb); // mantém as fotos locais no que voltou da nuvem
+      _fbAplicando=true;
+      try{ localStorage.setItem(KEY, JSON.stringify(mergedReceb)); }catch(e){}
+      _setTumbas(mergedTumbas);
+      _fbAplicando=false;
+      fdoc.set({ payload: JSON.stringify({ receb:_semFotos(mergedReceb), _tumbas:mergedTumbas }), updatedAt: Date.now() })
+        .catch(function(e){ console.warn('[Firebase] envio erro', e); });
+      if(typeof renderSaved==='function' && _sig(mergedReceb)!==_sig(receb)) renderSaved();
+    }).catch(function(){
+      // se não conseguiu ler a nuvem, grava direto (comportamento antigo) para não travar
+      fdoc.set({ payload: JSON.stringify({ receb:_semFotos(receb), _tumbas:tumbasL }), updatedAt: Date.now() }).catch(function(){});
+    });
   }
   function _fbAgendar(){ clearTimeout(_fbTimer); _fbTimer=setTimeout(_fbEnviar, 1200); }
 
@@ -2202,6 +2222,23 @@ atualizarClientes();
   }
   window.addEventListener('load', function(){ setTimeout(_fbEnviar, 3000); });
   window._fbForcarEnvio=_fbEnviar;
+
+  // Ingerir registros vindos da PLANILHA para a memória local (respeitando exclusões/lápides).
+  // Sem isto, um recebimento que está na planilha mas não no Firebase aparece só por um instante
+  // e some quando o Firebase redesenha a tela. Ao gravar local, ele também sobe pro Firebase.
+  window._ingestSheet=function(cloudArr){
+    try{
+      if(!_fbReady || !Array.isArray(cloudArr) || !cloudArr.length) return;
+      var local=_getReceb();
+      var merged=_mesclar(local, cloudArr, _getTumbas()); // planilha entra; local (mais novo) prevalece; lápides removem
+      _preservarFotos(local, merged);                     // mantém as fotos locais
+      if(_sig(merged)===_sig(local)) return;              // nada novo
+      _fbAplicando=true;
+      try{ localStorage.setItem(KEY, JSON.stringify(merged)); }catch(e){}
+      _fbAplicando=false;
+      _fbAgendar();                                        // propaga p/ o Firebase (chega em todos os aparelhos)
+    }catch(e){}
+  };
 })();
 </script>
 
