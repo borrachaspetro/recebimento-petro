@@ -1751,22 +1751,25 @@ function _preencheCliente(){
 }
 function renderSaved(){
   const all=JSON.parse(localStorage.getItem('petro_receb')||'[]');
-  renderFromArray(all,'Deste aparelho',true);
+  // Enquanto a planilha não responde, dizer "Deste aparelho" faz parecer que
+  // desconectou — e é só o tempo de carregar. Mostra "Carregando" nesse intervalo.
+  renderFromArray(all,SHEET_URL?'⏳ Carregando planilha…':'Deste aparelho',true);
   if(typeof _fotosGarantirNuvem==='function') _fotosGarantirNuvem(all); // garante que as fotos deste aparelho subiram p/ todos
   if(SHEET_URL) carregarNuvem();
 }
-/* AUTO-REPARO DA ETAPA
-   Até 17/08/2026 a etapa nunca era gravada na planilha — ela só ficava no aparelho
-   de quem clicou em "Enviar". Então o aparelho da Mari é quem tem a verdade.
-   Quando o app encontra um registro em que a etapa daqui é mais nova que a da
-   planilha, ele corrige a planilha sozinho. Basta a Mari abrir o app uma vez. */
-var _reparoEtapa=[];
+/* AUTO-REPARO DE ETAPA E STATUS
+   Até 17/08/2026 a etapa nunca era gravada na planilha, e o "Atendido" não era
+   gravado quando o aparelho estava sem o link da planilha. Nos dois casos a
+   informação certa ficou só no aparelho de quem clicou. Então esse aparelho é
+   a fonte da verdade: quando o registro daqui é mais novo e diverge do que está
+   na planilha, o app corrige a planilha sozinho. */
+var _reparoPend=[];
 function _reparoEnviar(){
-  if(!SHEET_URL||!_reparoEtapa.length)return;
-  var lista=_reparoEtapa.slice(0,25); _reparoEtapa=[]; // no máximo 25 por carga (limite do Apps Script)
-  toast('Corrigindo '+lista.length+' etapa(s) na planilha…');
+  if(!SHEET_URL||!_reparoPend.length)return;
+  var lista=_reparoPend.slice(0,25); _reparoPend=[]; // no máximo 25 por carga (limite do Apps Script)
+  toast('Corrigindo '+lista.length+' registro(s) na planilha…');
   lista.forEach(function(it,i){
-    setTimeout(function(){postSheet(SHEET_URL,{action:'etapa',id:it.id,etapa:it.etapa});},i*300);
+    setTimeout(function(){postSheet(SHEET_URL,it);},i*300);
   });
 }
 function carregarNuvem(tent){
@@ -1780,13 +1783,20 @@ function carregarNuvem(tent){
       local.forEach(function(r){
         if(!r||r.id==null)return;
         var k=String(r.id), c=map[k];
-        // O local só prevalece se for REALMENTE mais novo. Antes ele prevalecia sempre —
-        // e uma cópia velha guardada aqui escondia a etapa nova vinda da planilha
-        // (era por isso que orçamento enviado pela Mari não aparecia pro Fábio).
-        if(!c||(r.updatedAt||0)>(c.updatedAt||0)){
+        /* O registro do aparelho prevalece em caso de empate (>=), e NÃO só quando
+           é estritamente mais novo. Isso é de propósito: a planilha não devolve
+           updatedAt, então toda comparação daria empate e a planilha ganharia
+           sempre — escondendo da tela os orçamentos que só existem no aparelho.
+           A convergência vem pelo reparo abaixo, que empurra o que é daqui pra
+           planilha, e não por deixar a planilha sobrescrever o que está aqui. */
+        if(!c||(r.updatedAt||0)>=(c.updatedAt||0)){
           map[k]=r;
-          // este aparelho tem a etapa certa e a planilha está atrasada → conserta a planilha
-          if(c&&r.etapa&&(c.etapa||'comercial')!==r.etapa)_reparoEtapa.push({id:r.id,etapa:r.etapa});
+          // só repara a partir de alteração feita NESTE aparelho (tem updatedAt),
+          // para não empurrar cópia velha por cima do que já está certo na planilha
+          if(c&&r.updatedAt){
+            if(r.etapa&&(c.etapa||'comercial')!==r.etapa)_reparoPend.push({action:'etapa',id:r.id,etapa:r.etapa});
+            if(r.status&&(c.status||'Pendente')!==r.status)_reparoPend.push({action:'status',id:r.id,status:r.status});
+          }
           return;
         }
         // a planilha prevaleceu: preserva o que ela não guarda
@@ -1806,6 +1816,7 @@ function carregarNuvem(tent){
   s.onerror=function(){
     const e=document.getElementById(cb+'_s'); if(e)e.remove(); delete window[cb];
     if(tent<2){setTimeout(function(){carregarNuvem(tent+1);},1500*(tent+1));return;} // tenta 3x antes de desistir
+    var lbl=document.getElementById('origemLbl'); if(lbl)lbl.textContent='Deste aparelho'; // só agora é desconexão de verdade
     toast('Sem conexão com a planilha — mostrando deste aparelho');};
   document.body.appendChild(s);
 }
@@ -2130,18 +2141,24 @@ function salvarConfig(){
   localStorage.setItem('petro_emailorc',EMAIL_ORC);
   localStorage.setItem('petro_emailadm',EMAIL_ADM);
   const r=document.getElementById('resp');if(r&&!r.value)r.value=OPERADOR;
-  atualizaStatus();toast('Configurações salvas');
+  toast('Configurações salvas');
+  setTimeout(atualizaStatus,900); // deixa o teste anterior terminar antes de refazer
 }
 // Teste REAL de conexão: lê a planilha e mostra quantos registros vieram.
 // (antes ele mandava um POST no escuro e sempre dizia "enviado", mesmo falhando)
+let _testandoPlanilha=false;
 function testarPlanilha(silencioso){
+  // dois testes ao mesmo tempo (ex.: abrir a ⚙️ e salvar em seguida) faziam o
+  // segundo falhar e pintar de vermelho sem motivo. Um de cada vez.
+  if(_testandoPlanilha)return;
+  _testandoPlanilha=true;
   const url=(document.getElementById('cfgUrl').value.trim())||SHEET_URL_PADRAO;
   const s=document.getElementById('cfgStatus');
   if(s)s.innerHTML='<span class="status">⏳ Testando conexão…</span>';
   if(!silencioso)toast('Testando…');
   const cb='cbTeste_'+Date.now();
   const tmr=setTimeout(function(){falhou();},15000);
-  function limpar(){clearTimeout(tmr);const el=document.getElementById(cb+'_s');if(el)el.remove();try{delete window[cb];}catch(e){}}
+  function limpar(){_testandoPlanilha=false;clearTimeout(tmr);const el=document.getElementById(cb+'_s');if(el)el.remove();try{delete window[cb];}catch(e){}}
   function falhou(){limpar();
     if(s)s.innerHTML='<span class="status off">✕ Não conectou — confira o link e se o Apps Script está publicado para "Qualquer pessoa"</span>';
     if(!silencioso)toast('Não conectou');}
