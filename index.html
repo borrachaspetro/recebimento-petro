@@ -157,7 +157,7 @@
     <h1>Recebimento de Serviços</h1>
     <p>Borrachas Petro · Revestimento de rolos</p>
   </div>
-  <span class="cod">R 02-1</span>
+  <span class="cod" id="codVer" title="Revisão do formulário · versão do app">R 02-1</span>
   <button onclick="abrirConfig()" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;margin-left:6px" title="Configurações">⚙️</button>
 </header>
 
@@ -402,6 +402,7 @@
     <h3>⚙️ Configurações</h3>
     <p class="hint" style="margin-top:2px">Liga o app à planilha do Google e identifica o operador deste aparelho.</p>
     <div id="cfgStatus"></div>
+    <div id="cfgVersao" style="font-size:11px;color:#777;margin:6px 0 2px"></div>
     <label>Operador deste aparelho <span class="req">*</span></label>
     <input type="text" id="cfgOperador" placeholder="ex.: Emerson">
     <div class="hint">Esse nome é registrado como quem fez a admissão.</div>
@@ -457,6 +458,14 @@ const embTipoSel=new Set();
 const pecasState={}; // id -> {cb:'', visual:{}}
 // Link da planilha já embutido: aparelho novo abre conectado sem ninguém colar nada.
 // A CHAVE é conferida pelo Apps Script — envio sem ela é recusado.
+/* VERSÃO DO APP — trocar A CADA publicação no GitHub.
+   Aparece no cabeçalho (ao lado do R 02-1) e na ⚙️. Serve para conferir num
+   piscar de olhos se um aparelho já recarregou a versão nova: se o número
+   estiver diferente do dos outros, aquele aparelho está atrasado.
+   ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
+   junto — são coisas diferentes. */
+const APP_VERSAO='v2';
+const APP_DATA='17/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
 let SHEET_URL=localStorage.getItem('petro_sheetUrl')||SHEET_URL_PADRAO;
@@ -2115,6 +2124,8 @@ function limparForm(ask){
   if(ask)toast('Formulário limpo');
 }
 function abrirConfig(){
+  var vv=document.getElementById('cfgVersao');
+  if(vv)vv.textContent='Versão do app: '+APP_VERSAO+' ('+APP_DATA+') · Formulário R 02-1';
   document.getElementById('cfgOperador').value=OPERADOR;
   document.getElementById('cfgUrl').value=SHEET_URL;
   document.getElementById('cfgEmail').value=EMAIL_COM;
@@ -2266,6 +2277,8 @@ try{
   initSecoes();
   window.addEventListener('resize',initSecoes);
 }catch(e){console.warn('menu',e);}
+// mostra a versão no cabeçalho: "R 02-1 · v2"
+try{var _cv=document.getElementById('codVer'); if(_cv)_cv.textContent='R 02-1 · '+APP_VERSAO;}catch(e){}
 _limparFotosAntigas(30);
 _pendAtualiza();
 if(SHEET_URL)setTimeout(function(){filaEnviar(false);},2500); // sobe o que ficou pendente de sessões anteriores
