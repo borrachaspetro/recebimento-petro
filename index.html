@@ -464,7 +464,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v4';
+const APP_VERSAO='v6';
 const APP_DATA='17/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1760,9 +1760,10 @@ function _preencheCliente(){
 }
 function renderSaved(){
   const all=JSON.parse(localStorage.getItem('petro_receb')||'[]');
-  // Enquanto a planilha não responde, dizer "Deste aparelho" faz parecer que
-  // desconectou — e é só o tempo de carregar. Mostra "Carregando" nesse intervalo.
-  renderFromArray(all,SHEET_URL?'⏳ Carregando planilha…':'Deste aparelho',true);
+  /* O rótulo só volta para "Carregando" na PRIMEIRA vez. O Firebase chama esta
+     função a cada aviso de outro aparelho, e resetar o rótulo a cada aviso
+     deixava a tela presa em "Carregando planilha…" para sempre. */
+  renderFromArray(all,_origemAtual||(SHEET_URL?'⏳ Carregando planilha…':'Deste aparelho'),true);
   if(typeof _fotosGarantirNuvem==='function') _fotosGarantirNuvem(all); // garante que as fotos deste aparelho subiram p/ todos
   if(SHEET_URL) carregarNuvem();
 }
@@ -1773,6 +1774,11 @@ function renderSaved(){
    a fonte da verdade: quando o registro daqui é mais novo e diverge do que está
    na planilha, o app corrige a planilha sozinho. */
 var _reparoPend=[];
+/* Uma leitura da planilha por vez, e memória do último rótulo mostrado.
+   Sem a trava, cada aviso do Firebase disparava uma leitura nova; com vários
+   aparelhos abertos viravam dezenas de chamadas empilhadas — era isso que
+   congestionava o Apps Script e prendia a tela em "Carregando planilha…". */
+var _carregandoNuvem=false, _origemAtual='';
 function _reparoEnviar(){
   if(!SHEET_URL||!_reparoPend.length)return;
   var lista=_reparoPend.slice(0,40); _reparoPend=[];
@@ -1785,6 +1791,7 @@ function _reparoEnviar(){
 function carregarNuvem(tent){
   if(!SHEET_URL)return;
   tent=tent||0;
+  if(tent===0){ if(_carregandoNuvem)return; _carregandoNuvem=true; } // já tem uma leitura em andamento
   const cb='cbPetro_'+Date.now();
   /* Se o Apps Script devolve página de erro ou demora demais, o <script> carrega
      sem disparar onerror e a função de retorno nunca é chamada — a leitura ficava
@@ -1797,10 +1804,11 @@ function carregarNuvem(tent){
     const e=document.getElementById(cb+'_s'); if(e)e.remove();
     try{delete window[cb];}catch(_){}
     if(tent<2){setTimeout(function(){carregarNuvem(tent+1);},1500*(tent+1));return;}
-    var lbl=document.getElementById('origemLbl'); if(lbl)lbl.textContent='Deste aparelho';
+    _carregandoNuvem=false; _origemAtual='Deste aparelho';
+    var lbl=document.getElementById('origemLbl'); if(lbl)lbl.textContent=_origemAtual;
     toast('Sem conexão com a planilha — mostrando deste aparelho');
   }
-  window[cb]=function(arr){_fim=true;clearTimeout(_tmr);try{
+  window[cb]=function(arr){_fim=true;_carregandoNuvem=false;clearTimeout(_tmr);try{
       // mescla planilha + aparelho: o registro local (recém-editado) prevalece pelo id
       var cloud=arr||[]; var local=[]; try{local=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){}
       var map={}; cloud.forEach(function(r){if(r&&r.id!=null)map[String(r.id)]=r;});
@@ -1851,7 +1859,8 @@ function carregarNuvem(tent){
       });
       var merged=Object.keys(map).map(function(k){return map[k];});
       if(typeof window._ingestSheet==='function') window._ingestSheet(cloud); // grava os da planilha na memória e sobe p/ o Firebase
-      renderFromArray(merged,'Planilha · todos os aparelhos',true);
+      _origemAtual='Planilha · todos os aparelhos';
+      renderFromArray(merged,_origemAtual,true);
       _reparoEnviar();
     }catch(e){}
     delete window[cb]; const s2=document.getElementById(cb+'_s'); if(s2)s2.remove();};
@@ -2113,7 +2122,14 @@ function buildNav(){
   }).join('');
 }
 function irSecao(i){
-  _cards().forEach(function(c,j){ c.classList.toggle('ativa', j===i); });
+  var all=_cards();
+  if(!all.length)return;
+  if(!(i>=0)||i>=all.length)i=0;                 // índice inválido deixaria a tela sem nenhuma seção
+  if(all[i].style.display==='none'){             // não ativar seção escondida (admissão oculta)
+    var v=all.findIndex(function(c){return c.style.display!=='none';});
+    if(v>=0)i=v;
+  }
+  all.forEach(function(c,j){ c.classList.toggle('ativa', j===i); });
   document.querySelectorAll('#secNav .navitem').forEach(function(b){ b.classList.toggle('on', (+b.dataset.i)===i); });
 }
 let _admAberto=true;
@@ -2124,11 +2140,29 @@ function _aplicaAdm(){
   var t=document.getElementById('admToggleTxt'); if(t)t.textContent=mostrar?'▾ Ocultar dados da admissão':'▸ Mostrar dados da admissão (cliente, NF, embalagem…)';
 }
 function toggleAdm(){ _admAberto=!_admAberto; _aplicaAdm(); }
+/* Posição REAL do card de Peças na lista de seções.
+   Antes usava-se a CONTAGEM de seções da admissão como índice. Quando as duas
+   não coincidiam, o irSecao() ativava uma seção errada (ou nenhuma) e o
+   formulário abria em branco — parecia que o recebimento não abria para editar,
+   mas clicando no menu lateral funcionava. */
+function _idxPecas(){
+  var all=_cards();
+  var pcs=document.getElementById('pecas');
+  var pcard=pcs&&pcs.closest?pcs.closest('.card'):null;
+  var i=pcard?all.indexOf(pcard):-1;
+  if(i>=0)return i;
+  return Math.max(0,Math.min(_cardsAdmissao().length,all.length-1));
+}
 function modoAdmissao(etapa,enviado){
   var oculta=!!enviado&&(etapa==='comercial'||etapa==='orcamento');
   var tg=document.getElementById('admToggle'); if(tg)tg.classList.toggle('hide',!oculta);
   _admAberto=!oculta; _aplicaAdm();
-  if(oculta&&window.innerWidth>=900) irSecao(_cardsAdmissao().length); // desktop: abre direto nas Peças
+  if(!oculta)return;
+  // se a seção que estava ativa acabou de ser escondida, a tela ficaria vazia:
+  // nesse caso pula para as Peças mesmo fora do desktop
+  var at=document.querySelector('#view-novo > .wrap > .card.ativa');
+  var sumiu=!!at&&at.style.display==='none';
+  if(window.innerWidth>=900||sumiu) irSecao(_idxPecas()); // abre direto nas Peças
 }
 function initSecoes(){
   buildNav();
