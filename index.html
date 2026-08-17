@@ -464,7 +464,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v3';
+const APP_VERSAO='v4';
 const APP_DATA='17/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1775,17 +1775,32 @@ function renderSaved(){
 var _reparoPend=[];
 function _reparoEnviar(){
   if(!SHEET_URL||!_reparoPend.length)return;
-  var lista=_reparoPend.slice(0,25); _reparoPend=[]; // no máximo 25 por carga (limite do Apps Script)
+  var lista=_reparoPend.slice(0,40); _reparoPend=[];
+  /* UMA requisição só, com a lista inteira. Antes era uma por registro, e a
+     enxurrada de chamadas saturava o Apps Script — as leituras da planilha
+     ficavam penduradas e todo mundo travava em "Carregando planilha…". */
   toast('Corrigindo '+lista.length+' registro(s) na planilha…');
-  lista.forEach(function(it,i){
-    setTimeout(function(){postSheet(SHEET_URL,it);},i*300);
-  });
+  postSheet(SHEET_URL,{action:'lote',itens:lista});
 }
 function carregarNuvem(tent){
   if(!SHEET_URL)return;
   tent=tent||0;
   const cb='cbPetro_'+Date.now();
-  window[cb]=function(arr){try{
+  /* Se o Apps Script devolve página de erro ou demora demais, o <script> carrega
+     sem disparar onerror e a função de retorno nunca é chamada — a leitura ficava
+     pendurada para sempre ("⏳ Carregando planilha…" eterno). Este relógio garante
+     que a falha silenciosa vire falha de verdade, com retentativa. */
+  let _fim=false;
+  const _tmr=setTimeout(function(){ if(!_fim)_falhou(); },14000);
+  function _falhou(){
+    _fim=true; clearTimeout(_tmr);
+    const e=document.getElementById(cb+'_s'); if(e)e.remove();
+    try{delete window[cb];}catch(_){}
+    if(tent<2){setTimeout(function(){carregarNuvem(tent+1);},1500*(tent+1));return;}
+    var lbl=document.getElementById('origemLbl'); if(lbl)lbl.textContent='Deste aparelho';
+    toast('Sem conexão com a planilha — mostrando deste aparelho');
+  }
+  window[cb]=function(arr){_fim=true;clearTimeout(_tmr);try{
       // mescla planilha + aparelho: o registro local (recém-editado) prevalece pelo id
       var cloud=arr||[]; var local=[]; try{local=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){}
       var map={}; cloud.forEach(function(r){if(r&&r.id!=null)map[String(r.id)]=r;});
@@ -2216,7 +2231,8 @@ function _filaChave(obj){
 }
 function _filaCabe(obj){try{return JSON.stringify(obj).length<FILA_TAM_MAX;}catch(e){return false;}}
 function _filaAdd(obj){
-  if(!obj||obj.teste)return false;
+  // 'lote' é reparo automático: se falhar, é recalculado na próxima carga
+  if(!obj||obj.teste||obj.action==='lote')return false;
   if(!_filaCabe(obj))return false;
   var ch=_filaChave(obj);
   var f=_filaLer();
