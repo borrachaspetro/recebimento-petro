@@ -378,6 +378,10 @@
           <input type="text" id="buscaCliente" placeholder="🔎 Buscar por cliente ou NF…" oninput="filtrarLista()" style="margin-bottom:0">
           <button class="btn btn-sec" style="padding:11px 13px" onclick="renderSaved()" title="Atualizar da planilha">🔄</button>
         </div>
+        <div id="pendBar" style="display:none;align-items:center;gap:10px;background:#fff4e0;border:1px solid #f0a500;border-left:5px solid #f0a500;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+          <span id="pendTxt" style="flex:1;font-size:13px;font-weight:600;color:#8a5200;line-height:1.35"></span>
+          <button class="btn btn-sec" style="padding:8px 12px;font-size:12px;white-space:nowrap;margin:0" onclick="filaEnviar(true)">Reenviar agora</button>
+        </div>
         <div id="savedList"></div>
       </div>
     </div>
@@ -415,6 +419,7 @@
     <div class="hint">Destino "Admissão" (quando o comercial devolve para corrigir). Pode pôr vários separados por vírgula.</div>
     <button class="btn btn-prim" style="width:100%" onclick="salvarConfig()">Salvar</button>
     <button class="btn" style="width:100%;background:#eee;margin-top:10px" onclick="testarPlanilha()">Testar conexão</button>
+    <button class="btn" style="width:100%;background:#fdecea;color:#C0392B;margin-top:10px" onclick="if(window._appLogout)_appLogout()">Sair (deslogar deste aparelho)</button>
   </div>
 </div>
 
@@ -450,7 +455,11 @@ let fotos=[], editId=null, pecaSeq=0;
 const sel={transp:'',nfdiv:'',embCond:'',embConserto:'',embNovaCaixa:'',servico:'',confcli:''};
 const embTipoSel=new Set();
 const pecasState={}; // id -> {cb:'', visual:{}}
-let SHEET_URL=localStorage.getItem('petro_sheetUrl')||'';
+// Link da planilha já embutido: aparelho novo abre conectado sem ninguém colar nada.
+// A CHAVE é conferida pelo Apps Script — envio sem ela é recusado.
+const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
+const CHAVE='petro-r02-9f4c1a';
+let SHEET_URL=localStorage.getItem('petro_sheetUrl')||SHEET_URL_PADRAO;
 let OPERADOR=localStorage.getItem('petro_operador')||'';
 let EMAIL_COM=localStorage.getItem('petro_emailcom')||'vendas1@borrachaspetro.com.br, vendas2@borrachaspetro.com.br';
 let EMAIL_ORC=localStorage.getItem('petro_emailorc')||'fabio@borrachaspetro.com.br';
@@ -1113,7 +1122,7 @@ function salvarFicha(enviarDepois){
   eb.classList.remove('show');
   const d=coletar(pecas);
   salvarLocal(d);
-  enviarPlanilha(d);
+  enviarPlanilha(d,!!editId);
   if(typeof _fotosEnviarNuvem==='function')_fotosEnviarNuvem(d); // sobe as fotos pra nuvem (chegam nas outras áreas)
   editId=null;
   limparForm(false);
@@ -1184,6 +1193,9 @@ function confirmarEnviar(){
   arr.forEach(function(a){if(String(a.id)===String(id)){ if(dest!=='cliente')a.etapa=dest; a.jaEnviado=true; a.updatedAt=now; }});
   try{localStorage.setItem('petro_receb',JSON.stringify(arr));}catch(e){}
   (LISTA_ATUAL||[]).forEach(function(a){if(String(a.id)===String(id)){ if(dest!=='cliente')a.etapa=dest; a.jaEnviado=true; a.updatedAt=now; }});
+  // grava a etapa NA PLANILHA também. Sem isto a mudança só existia neste aparelho
+  // (e no Firebase) — quem lia pela planilha via tudo como "Pendente Comercial".
+  if(dest!=='cliente'&&SHEET_URL)postSheet(SHEET_URL,{action:'etapa',id:id,etapa:dest});
   if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
   var nomeArea=AREAS[dest].nome;
   var assunto=_tituloFicha(d);
@@ -1743,30 +1755,71 @@ function renderSaved(){
   if(typeof _fotosGarantirNuvem==='function') _fotosGarantirNuvem(all); // garante que as fotos deste aparelho subiram p/ todos
   if(SHEET_URL) carregarNuvem();
 }
-function carregarNuvem(){
+/* AUTO-REPARO DA ETAPA
+   Até 17/08/2026 a etapa nunca era gravada na planilha — ela só ficava no aparelho
+   de quem clicou em "Enviar". Então o aparelho da Mari é quem tem a verdade.
+   Quando o app encontra um registro em que a etapa daqui é mais nova que a da
+   planilha, ele corrige a planilha sozinho. Basta a Mari abrir o app uma vez. */
+var _reparoEtapa=[];
+function _reparoEnviar(){
+  if(!SHEET_URL||!_reparoEtapa.length)return;
+  var lista=_reparoEtapa.slice(0,25); _reparoEtapa=[]; // no máximo 25 por carga (limite do Apps Script)
+  toast('Corrigindo '+lista.length+' etapa(s) na planilha…');
+  lista.forEach(function(it,i){
+    setTimeout(function(){postSheet(SHEET_URL,{action:'etapa',id:it.id,etapa:it.etapa});},i*300);
+  });
+}
+function carregarNuvem(tent){
   if(!SHEET_URL)return;
+  tent=tent||0;
   const cb='cbPetro_'+Date.now();
   window[cb]=function(arr){try{
       // mescla planilha + aparelho: o registro local (recém-editado) prevalece pelo id
       var cloud=arr||[]; var local=[]; try{local=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){}
       var map={}; cloud.forEach(function(r){if(r&&r.id!=null)map[String(r.id)]=r;});
-      local.forEach(function(r){if(r&&r.id!=null)map[String(r.id)]=r;});
+      local.forEach(function(r){
+        if(!r||r.id==null)return;
+        var k=String(r.id), c=map[k];
+        // O local só prevalece se for REALMENTE mais novo. Antes ele prevalecia sempre —
+        // e uma cópia velha guardada aqui escondia a etapa nova vinda da planilha
+        // (era por isso que orçamento enviado pela Mari não aparecia pro Fábio).
+        if(!c||(r.updatedAt||0)>(c.updatedAt||0)){
+          map[k]=r;
+          // este aparelho tem a etapa certa e a planilha está atrasada → conserta a planilha
+          if(c&&r.etapa&&(c.etapa||'comercial')!==r.etapa)_reparoEtapa.push({id:r.id,etapa:r.etapa});
+          return;
+        }
+        // a planilha prevaleceu: preserva o que ela não guarda
+        if(r.fotos&&r.fotos.length&&!(c.fotos&&c.fotos.length))c.fotos=r.fotos;
+        if(r.jaEnviado&&!c.jaEnviado)c.jaEnviado=r.jaEnviado;
+        if(r.pdfEnviado&&!c.pdfEnviado){c.pdfEnviado=r.pdfEnviado;c.pdfEnviadoEm=r.pdfEnviadoEm;}
+        if(r.orcPronto&&!c.orcPronto)c.orcPronto=r.orcPronto;
+      });
       var merged=Object.keys(map).map(function(k){return map[k];});
       if(typeof window._ingestSheet==='function') window._ingestSheet(cloud); // grava os da planilha na memória e sobe p/ o Firebase
       renderFromArray(merged,'Planilha · todos os aparelhos',true);
+      _reparoEnviar();
     }catch(e){}
     delete window[cb]; const s2=document.getElementById(cb+'_s'); if(s2)s2.remove();};
   const s=document.createElement('script'); s.id=cb+'_s';
-  s.src=SHEET_URL+(SHEET_URL.indexOf('?')<0?'?':'&')+'callback='+cb+'&t='+Date.now();
-  s.onerror=function(){toast('Sem conexão com a planilha — mostrando deste aparelho');
-    const e=document.getElementById(cb+'_s'); if(e)e.remove(); delete window[cb];};
+  s.src=SHEET_URL+(SHEET_URL.indexOf('?')<0?'?':'&')+'callback='+cb+'&k='+encodeURIComponent(CHAVE)+'&t='+Date.now();
+  s.onerror=function(){
+    const e=document.getElementById(cb+'_s'); if(e)e.remove(); delete window[cb];
+    if(tent<2){setTimeout(function(){carregarNuvem(tent+1);},1500*(tent+1));return;} // tenta 3x antes de desistir
+    toast('Sem conexão com a planilha — mostrando deste aparelho');};
   document.body.appendChild(s);
 }
+// quando a internet voltar: recarrega a planilha e sobe o que ficou pendente
+window.addEventListener('online',function(){
+  if(!SHEET_URL)return;
+  setTimeout(function(){filaEnviar(false);carregarNuvem();},800);
+});
 function renderFromArray(arr,origem,acoes){
   LISTA_ATUAL=arr||[]; ACOES_ATUAL=acoes;
   document.getElementById('cnt').textContent=LISTA_ATUAL.length;
   renderDash(LISTA_ATUAL);
   const lbl=document.getElementById('origemLbl'); if(lbl)lbl.textContent=origem;
+  if(typeof _pendAtualiza==='function')_pendAtualiza();
   filtrarLista();
   atualizarClientes();
 }
@@ -2062,11 +2115,12 @@ function abrirConfig(){
 function fecharConfig(){document.getElementById('cfgModal').classList.remove('show');}
 function atualizaStatus(){
   const s=document.getElementById('cfgStatus');
-  s.innerHTML=SHEET_URL?'<span class="status on">✓ Planilha conectada</span>':'<span class="status off">Planilha não conectada</span>';
+  if(!SHEET_URL){s.innerHTML='<span class="status off">Planilha não conectada</span>';return;}
+  testarPlanilha(true); // agora testa de verdade, não só olha se o link está preenchido
 }
 function salvarConfig(){
   OPERADOR=document.getElementById('cfgOperador').value.trim();
-  SHEET_URL=document.getElementById('cfgUrl').value.trim();
+  SHEET_URL=document.getElementById('cfgUrl').value.trim()||SHEET_URL_PADRAO; // apagar o campo volta pro link padrão
   EMAIL_COM=document.getElementById('cfgEmail').value.trim();
   EMAIL_ORC=document.getElementById('cfgEmailOrc').value.trim();
   EMAIL_ADM=document.getElementById('cfgEmailAdm').value.trim();
@@ -2078,19 +2132,107 @@ function salvarConfig(){
   const r=document.getElementById('resp');if(r&&!r.value)r.value=OPERADOR;
   atualizaStatus();toast('Configurações salvas');
 }
-function testarPlanilha(){
-  const url=document.getElementById('cfgUrl').value.trim();
-  if(!url){toast('Cole o link da planilha primeiro');return;}
-  postSheet(url,{teste:true,operador:document.getElementById('cfgOperador').value.trim()||'teste',criado:new Date().toLocaleString('pt-BR')});
-  toast('Enviado teste — confira a planilha');
+// Teste REAL de conexão: lê a planilha e mostra quantos registros vieram.
+// (antes ele mandava um POST no escuro e sempre dizia "enviado", mesmo falhando)
+function testarPlanilha(silencioso){
+  const url=(document.getElementById('cfgUrl').value.trim())||SHEET_URL_PADRAO;
+  const s=document.getElementById('cfgStatus');
+  if(s)s.innerHTML='<span class="status">⏳ Testando conexão…</span>';
+  if(!silencioso)toast('Testando…');
+  const cb='cbTeste_'+Date.now();
+  const tmr=setTimeout(function(){falhou();},15000);
+  function limpar(){clearTimeout(tmr);const el=document.getElementById(cb+'_s');if(el)el.remove();try{delete window[cb];}catch(e){}}
+  function falhou(){limpar();
+    if(s)s.innerHTML='<span class="status off">✕ Não conectou — confira o link e se o Apps Script está publicado para "Qualquer pessoa"</span>';
+    if(!silencioso)toast('Não conectou');}
+  window[cb]=function(arr){limpar();
+    const n=(arr&&arr.length)||0;
+    if(s)s.innerHTML='<span class="status on">✓ Conectada — '+n+' registro(s) na planilha</span>';
+    if(!silencioso)toast('Conectado ✓');};
+  const sc=document.createElement('script');sc.id=cb+'_s';
+  sc.src=url+(url.indexOf('?')<0?'?':'&')+'callback='+cb+'&k='+encodeURIComponent(CHAVE)+'&t='+Date.now();
+  sc.onerror=falhou;
+  document.body.appendChild(sc);
+}
+/* ===== FILA DE REENVIO PRA PLANILHA =====
+   Sem internet o envio falhava calado e o registro nunca chegava na planilha.
+   Agora o que falha fica guardado no aparelho e sobe sozinho quando a rede volta. */
+const FILA_KEY='petro_filaSheet';
+const FILA_MAX=200;
+const FILA_TAM_MAX=400000; // ~400 KB: e-mail com PDF grande não entra na fila (estouraria o localStorage)
+function _filaLer(){try{return JSON.parse(localStorage.getItem(FILA_KEY)||'[]');}catch(e){return [];}}
+function _filaGravar(f){try{localStorage.setItem(FILA_KEY,JSON.stringify(f));}catch(e){}}
+function _filaChave(obj){
+  if(obj&&obj.action==='email')return 'email:'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+  return (obj&&obj.action||'novo')+':'+((obj&&obj.id)||'');
+}
+function _filaCabe(obj){try{return JSON.stringify(obj).length<FILA_TAM_MAX;}catch(e){return false;}}
+function _filaAdd(obj){
+  if(!obj||obj.teste)return false;
+  if(!_filaCabe(obj))return false;
+  var ch=_filaChave(obj);
+  var f=_filaLer();
+  var novo={chave:ch,obj:obj,quando:Date.now(),tentativas:0};
+  var pos=-1;
+  for(var i=0;i<f.length;i++){if(f[i].chave===ch){pos=i;break;}}
+  // repõe NA MESMA POSIÇÃO: manter a ordem original é o que impede o 'novo'
+  // de subir depois do 'status' e apagar o Atendido lá na planilha
+  if(pos>=0)f[pos]=novo; else f.push(novo);
+  if(f.length>FILA_MAX)f=f.slice(-FILA_MAX);
+  _filaGravar(f);_pendAtualiza();
+  return true;
+}
+function _comChave(obj){var c={};for(var k in obj)c[k]=obj[k];if(CHAVE)c.k=CHAVE;return c;}
+function _pendAtualiza(){
+  var bar=document.getElementById('pendBar'),txt=document.getElementById('pendTxt');
+  if(!bar||!txt)return;
+  var n=_filaLer().length;
+  if(!n){bar.style.display='none';return;}
+  bar.style.display='flex';
+  txt.textContent='⚠️ '+n+(n===1?' recebimento ainda não foi':' recebimentos ainda não foram')+' para a planilha (sem internet na hora do envio).';
+}
+let _flushando=false;
+function filaEnviar(manual){
+  if(_flushando)return;
+  var f=_filaLer();
+  if(!f.length){if(manual)toast('Nada pendente ✓');_pendAtualiza();return;}
+  if(!SHEET_URL){if(manual)toast('Configure o link da planilha em ⚙️');return;}
+  _flushando=true;
+  if(manual)toast('Reenviando '+f.length+'…');
+  var falhas=[],ok=0;
+  function passo(i){
+    if(i>=f.length){
+      var agora=_filaLer();
+      var novos=agora.filter(function(it){return !f.some(function(x){return x.chave===it.chave;});});
+      _filaGravar(falhas.concat(novos));
+      _flushando=false;_pendAtualiza();
+      if(ok)toast(ok+(ok===1?' registro enviado':' registros enviados')+' pra planilha ✓');
+      else if(manual)toast('Ainda sem conexão com a planilha');
+      if(ok&&SHEET_URL)setTimeout(function(){carregarNuvem();},1200);
+      return;
+    }
+    var it=f[i];
+    fetch(SHEET_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(_comChave(it.obj))})
+      .then(function(){ok++;})
+      .catch(function(){it.tentativas=(it.tentativas||0)+1;falhas.push(it);})
+      .then(function(){setTimeout(function(){passo(i+1);},250);});
+  }
+  passo(0);
 }
 function postSheet(url,obj){
-  return fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(obj)}).catch(function(){});
+  return fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(_comChave(obj))})
+    .catch(function(){
+      if(_filaAdd(obj))toast('Sem internet — guardado pra enviar depois');
+      else if(obj&&obj.action==='email')toast('Sem internet — o e-mail não saiu. Tente de novo quando conectar.');
+    });
 }
-function enviarPlanilha(d){
+function enviarPlanilha(d,editando){
   if(!SHEET_URL)return;
   var c={};for(var k in d){if(k!=='fotos')c[k]=d[k];}
   c.qtdFotos=(d.fotos&&d.fotos.length)||0;
+  // 'editar' apaga as linhas antigas do ID e regrava. Sem isto, cada edição
+  // acrescentava linhas novas com o mesmo ID e as peças apareciam duplicadas.
+  c.action=editando?'editar':'novo';
   postSheet(SHEET_URL,c);
 }
 let toastT;
@@ -2108,6 +2250,8 @@ try{
   window.addEventListener('resize',initSecoes);
 }catch(e){console.warn('menu',e);}
 _limparFotosAntigas(30);
+_pendAtualiza();
+if(SHEET_URL)setTimeout(function(){filaEnviar(false);},2500); // sobe o que ficou pendente de sessões anteriores
 renderSaved();
 addPeca();
 atualizarClientes();
@@ -2120,6 +2264,7 @@ atualizarClientes();
      >>> Preencha o firebaseConfig com os dados do SEU projeto Firebase da Petro. <<< -->
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
 <script>
 (function(){
   var firebaseConfig = {
@@ -2402,6 +2547,57 @@ atualizarClientes();
       try{ if(_fbOn()) _col().doc(String(id)).delete().catch(function(){}); }catch(e){}
     };
   }
+})();
+</script>
+
+<!-- ════════ LOGIN DA EQUIPE (senha única) ════════
+     Protege o acesso à nuvem: as regras do Firebase passam a exigir login.
+     O app lembra a sessão no aparelho (entra 1 vez). Sem Firebase (offline/SDK
+     não carregou) NÃO trava — segue em modo local pelo próprio aparelho. -->
+<script>
+(function(){
+  var gate=document.createElement('div');
+  gate.id='loginGate';
+  gate.style.cssText='position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;background:#111;padding:20px';
+  gate.innerHTML=''+
+    '<div style="width:100%;max-width:340px;background:#1b1b1b;border:1px solid #333;border-radius:16px;padding:24px 20px;text-align:center;font-family:inherit">'+
+      '<div style="font-size:15px;font-weight:800;color:#FFCC00;letter-spacing:.5px">BORRACHAS PETRO</div>'+
+      '<div style="font-size:13px;color:#ccc;margin:2px 0 18px">Recebimento de Serviços — acesso da equipe</div>'+
+      '<input id="lgEmail" type="email" autocomplete="username" value="recebimento@borrachaspetro.com.br" placeholder="E-mail da equipe" style="width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:9px;border-radius:9px;border:1px solid #444;background:#111;color:#fff;font-size:15px">'+
+      '<input id="lgPass" type="password" autocomplete="current-password" placeholder="Senha" style="width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:12px;border-radius:9px;border:1px solid #444;background:#111;color:#fff;font-size:15px">'+
+      '<button id="lgBtn" style="width:100%;padding:12px;border:0;border-radius:9px;background:#FFCC00;color:#111;font-weight:800;font-size:15px;cursor:pointer">Entrar</button>'+
+      '<div id="lgErr" style="color:#ff6b6b;font-size:13px;margin-top:10px;min-height:16px"></div>'+
+      '<div style="color:#777;font-size:11px;margin-top:6px">Acesso restrito. Você entra uma vez por aparelho.</div>'+
+    '</div>';
+  document.body.appendChild(gate);
+
+  // ►►► LIGA/DESLIGA do login da equipe ◄◄◄
+  // Deixe FALSE até criar a conta da equipe no Firebase (guia, Passo 7).
+  // Troque para true SÓ depois de: criar a conta + publicar as regras novas.
+  var LOGIN_EQUIPE = false;
+  if(!LOGIN_EQUIPE){ gate.style.display='none'; return; } // login desligado → app abre normal
+
+  var auth=null;
+  try{ if(typeof firebase!=='undefined' && firebase.apps && firebase.apps.length && firebase.auth){ auth=firebase.auth(); } }catch(e){}
+  if(!auth){ gate.style.display='none'; return; } // sem Firebase → modo local, não trava o app
+  try{ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); }catch(e){}
+
+  function entrar(){
+    var em=(document.getElementById('lgEmail').value||'').trim();
+    var pw=document.getElementById('lgPass').value||'';
+    var err=document.getElementById('lgErr'); err.textContent='';
+    if(!em||!pw){ err.textContent='Preencha e-mail e senha.'; return; }
+    var btn=document.getElementById('lgBtn'); btn.disabled=true; btn.textContent='Entrando…';
+    auth.signInWithEmailAndPassword(em,pw)
+      .then(function(){ location.reload(); })
+      .catch(function(e){ btn.disabled=false; btn.textContent='Entrar';
+        err.textContent=(e&&e.code==='auth/too-many-requests')?'Muitas tentativas. Aguarde um pouco.':'E-mail ou senha inválidos.'; });
+  }
+  document.getElementById('lgBtn').onclick=entrar;
+  document.getElementById('lgPass').addEventListener('keydown',function(e){ if(e.key==='Enter')entrar(); });
+
+  window._appLogout=function(){ try{ auth.signOut().then(function(){location.reload();}); }catch(e){ location.reload(); } };
+  auth.onAuthStateChanged(function(u){ gate.style.display = u ? 'none' : 'flex'; });
 })();
 </script>
 </body>
