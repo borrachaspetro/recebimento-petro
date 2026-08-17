@@ -464,7 +464,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v6';
+const APP_VERSAO='v8';
 const APP_DATA='17/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1844,6 +1844,13 @@ function carregarNuvem(tent){
           var vLocal=r[campo]||padrao, vNuvem=c[campo]||padrao;
           if(vLocal===vNuvem)return;
           if(_pf[k+'|'+campo])return;
+          /* STATUS: a planilha SEMPRE manda. Conferido na planilha de 17/08/2026 —
+             os 119 atendidos têm todos a data em "Atendido em", ou seja, o caminho
+             do Atendido para a planilha sempre funcionou. Tratar o status igual à
+             etapa fazia o aparelho impor "Atendido" a registros que a planilha tem
+             como pendentes (o app mostrava 8 pendentes onde havia 38) e ainda
+             empurrava esse erro de volta para a planilha. */
+          if(campo==='status'){ venceu.status=vNuvem; return; }
           if((c.updatedAt||0)>0){ venceu[campo]=vNuvem; return; }
           /* Linha antiga, sem carimbo dos dois lados. Aqui vale a assimetria:
              valor DIFERENTE do padrão ("orcamento", "Atendido") só existe porque
@@ -1866,11 +1873,10 @@ function carregarNuvem(tent){
     delete window[cb]; const s2=document.getElementById(cb+'_s'); if(s2)s2.remove();};
   const s=document.createElement('script'); s.id=cb+'_s';
   s.src=SHEET_URL+(SHEET_URL.indexOf('?')<0?'?':'&')+'callback='+cb+'&k='+encodeURIComponent(CHAVE)+'&t='+Date.now();
-  s.onerror=function(){
-    const e=document.getElementById(cb+'_s'); if(e)e.remove(); delete window[cb];
-    if(tent<2){setTimeout(function(){carregarNuvem(tent+1);},1500*(tent+1));return;} // tenta 3x antes de desistir
-    var lbl=document.getElementById('origemLbl'); if(lbl)lbl.textContent='Deste aparelho'; // só agora é desconexão de verdade
-    toast('Sem conexão com a planilha — mostrando deste aparelho');};
+  // erro e demora seguem o MESMO caminho. Antes eram dois trechos separados, e o
+  // do erro não liberava a trava _carregandoNuvem — bastava uma falha para o app
+  // nunca mais tentar ler a planilha, ficando preso em "Carregando" para sempre.
+  s.onerror=function(){ if(!_fim)_falhou(); };
   document.body.appendChild(s);
 }
 // quando a internet voltar: recarrega a planilha e sobe o que ficou pendente
