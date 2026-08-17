@@ -464,7 +464,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v2';
+const APP_VERSAO='v3';
 const APP_DATA='17/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1789,30 +1789,50 @@ function carregarNuvem(tent){
       // mescla planilha + aparelho: o registro local (recém-editado) prevalece pelo id
       var cloud=arr||[]; var local=[]; try{local=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){}
       var map={}; cloud.forEach(function(r){if(r&&r.id!=null)map[String(r.id)]=r;});
+      // o que ainda não subiu pra planilha (fila offline) precisa continuar
+      // valendo o do aparelho, senão a ação do operador parece que foi desfeita
+      var _pf={};
+      try{_filaLer().forEach(function(it){if(it&&it.obj&&it.obj.id!=null)_pf[String(it.obj.id)+'|'+(it.obj.action||'novo')]=1;});}catch(e){}
       local.forEach(function(r){
         if(!r||r.id==null)return;
-        var k=String(r.id), c=map[k];
-        /* O registro do aparelho prevalece em caso de empate (>=), e NÃO só quando
-           é estritamente mais novo. Isso é de propósito: a planilha não devolve
-           updatedAt, então toda comparação daria empate e a planilha ganharia
-           sempre — escondendo da tela os orçamentos que só existem no aparelho.
-           A convergência vem pelo reparo abaixo, que empurra o que é daqui pra
-           planilha, e não por deixar a planilha sobrescrever o que está aqui. */
-        if(!c||(r.updatedAt||0)>=(c.updatedAt||0)){
-          map[k]=r;
-          // só repara a partir de alteração feita NESTE aparelho (tem updatedAt),
-          // para não empurrar cópia velha por cima do que já está certo na planilha
-          if(c&&r.updatedAt){
-            if(r.etapa&&(c.etapa||'comercial')!==r.etapa)_reparoPend.push({action:'etapa',id:r.id,etapa:r.etapa});
-            if(r.status&&(c.status||'Pendente')!==r.status)_reparoPend.push({action:'status',id:r.id,status:r.status});
-          }
-          return;
+        var k=String(r.id), c=map[k], venceu;
+        // 1) quem vence no geral (dados da ficha): o mais recente; empate fica com o aparelho
+        if(!c||(r.updatedAt||0)>=(c.updatedAt||0)){ map[k]=r; venceu=r; }
+        else{
+          // a planilha prevaleceu: preserva o que ela não guarda
+          if(r.fotos&&r.fotos.length&&!(c.fotos&&c.fotos.length))c.fotos=r.fotos;
+          if(r.jaEnviado&&!c.jaEnviado)c.jaEnviado=r.jaEnviado;
+          if(r.pdfEnviado&&!c.pdfEnviado){c.pdfEnviado=r.pdfEnviado;c.pdfEnviadoEm=r.pdfEnviadoEm;}
+          if(r.orcPronto&&!c.orcPronto)c.orcPronto=r.orcPronto;
+          venceu=c;
         }
-        // a planilha prevaleceu: preserva o que ela não guarda
-        if(r.fotos&&r.fotos.length&&!(c.fotos&&c.fotos.length))c.fotos=r.fotos;
-        if(r.jaEnviado&&!c.jaEnviado)c.jaEnviado=r.jaEnviado;
-        if(r.pdfEnviado&&!c.pdfEnviado){c.pdfEnviado=r.pdfEnviado;c.pdfEnviadoEm=r.pdfEnviadoEm;}
-        if(r.orcPronto&&!c.orcPronto)c.orcPronto=r.orcPronto;
+        if(!c)return;
+        /* 2) ETAPA e STATUS seguem regra própria — são o que define em qual fila o
+           recebimento aparece, e o que mais causou confusão:
+             - planilha JÁ carimbada (coluna "Atualizado em" preenchida) → ela manda.
+               É a fonte de verdade: hoje toda mudança é gravada nela na hora.
+             - planilha SEM carimbo (linha antiga, de antes de 17/08/2026) → manda o
+               aparelho, e o app empurra o valor pra planilha, que passa a ter carimbo.
+               Assim o histórico se acerta sozinho, uma linha por vez.
+             - alteração ainda na fila offline → manda o aparelho, senão a ação do
+               operador pareceria desfeita até a internet voltar. */
+        ['etapa','status'].forEach(function(campo){
+          var padrao=(campo==='etapa')?'comercial':'Pendente';
+          var vLocal=r[campo]||padrao, vNuvem=c[campo]||padrao;
+          if(vLocal===vNuvem)return;
+          if(_pf[k+'|'+campo])return;
+          if((c.updatedAt||0)>0){ venceu[campo]=vNuvem; return; }
+          /* Linha antiga, sem carimbo dos dois lados. Aqui vale a assimetria:
+             valor DIFERENTE do padrão ("orcamento", "Atendido") só existe porque
+             alguém agiu; valor padrão ("comercial", "Pendente") não prova nada.
+             Sem isto o app empurraria "comercial" por cima do "orcamento" que já
+             está certo na planilha — apagando justamente a informação boa. */
+          if(vNuvem!==padrao){ venceu[campo]=vNuvem; return; }
+          if(r.updatedAt){
+            venceu[campo]=vLocal;
+            var it={action:campo,id:r.id}; it[campo]=vLocal; _reparoPend.push(it);
+          }
+        });
       });
       var merged=Object.keys(map).map(function(k){return map[k];});
       if(typeof window._ingestSheet==='function') window._ingestSheet(cloud); // grava os da planilha na memória e sobe p/ o Firebase
