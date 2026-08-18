@@ -464,7 +464,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v12';
+const APP_VERSAO='v13';
 const APP_DATA='17/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1618,12 +1618,17 @@ function _marcarPdfEnviado(id){
 function orcamentoPronto(id){
   var d=(LISTA_ATUAL||[]).find(function(a){return String(a.id)===String(id);})||JSON.parse(localStorage.getItem('petro_receb')||'[]').find(function(a){return String(a.id)===String(id);});
   if(!d){toast('Recebimento não encontrado');return;}
-  if(!confirm('Marcar o ORÇAMENTO como pronto e avisar o comercial?'))return;
+  if(!confirm('Marcar o ORÇAMENTO como pronto e DEVOLVER ao comercial?'))return;
   var now=Date.now();
+  /* Devolve para a fila do Comercial, não só avisa por e-mail.
+     Antes o recebimento continuava como "Pendente Orçamento" mesmo depois de
+     pronto: o comercial recebia o e-mail mas não via o item voltar na tela, e
+     quem fecha o pedido é o comercial. */
   var arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');
-  arr.forEach(function(a){if(String(a.id)===String(id)){a.orcPronto=true;a.orcProntoEm=now;a.updatedAt=now;}});
+  arr.forEach(function(a){if(String(a.id)===String(id)){a.orcPronto=true;a.orcProntoEm=now;a.etapa='comercial';a.updatedAt=now;}});
   try{localStorage.setItem('petro_receb',JSON.stringify(arr));}catch(e){}
-  (LISTA_ATUAL||[]).forEach(function(a){if(String(a.id)===String(id)){a.orcPronto=true;a.orcProntoEm=now;a.updatedAt=now;}});
+  (LISTA_ATUAL||[]).forEach(function(a){if(String(a.id)===String(id)){a.orcPronto=true;a.orcProntoEm=now;a.etapa='comercial';a.updatedAt=now;}});
+  if(SHEET_URL)postSheet(SHEET_URL,{action:'etapa',id:id,etapa:'comercial'}); // grava a volta na planilha
   if(SHEET_URL&&EMAIL_COM){
     postSheet(SHEET_URL,{action:'email',to:EMAIL_COM,
       assunto:'Orçamento pronto — '+(d.cliente||'')+' (NF '+(d.nf||'—')+')',
@@ -1632,7 +1637,7 @@ function orcamentoPronto(id){
   if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
   var lbl=document.getElementById('origemLbl');
   renderFromArray(LISTA_ATUAL,lbl?lbl.textContent:'',ACOES_ATUAL);
-  toast('Orçamento pronto — comercial avisado ✓');
+  toast('Orçamento pronto — devolvido ao comercial ✓');
 }
 function _resumoOrc(d){
   var t='Cliente: '+(d.cliente||'')+' · NF '+(d.nf||'—')+'\n';
