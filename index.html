@@ -464,7 +464,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v11';
+const APP_VERSAO='v12';
 const APP_DATA='17/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -2049,7 +2049,13 @@ function carregarParaEditar(id){
     if(p.tipo){const _ts=pe.querySelector('.p_tipo');if(_ts){_ts.value=p.tipo;_ts.dispatchEvent(new Event('change'));}}
     if(p.cb){const b=[].slice.call(pe.querySelectorAll('.cbseg button')).find(x=>x.dataset.v===p.cb);if(b)b.click();}
     // ---- acabamento ----
-    if(p.acab){const b=[].slice.call(pe.querySelectorAll('.acabseg button')).find(x=>x.dataset.v===p.acab);if(b)b.click();}
+    /* A planilha guarda só o RESULTADO (texto do acabamento, lista de acessórios),
+       não as respostas "Sim/Não". Registro vindo da planilha chegava com esses
+       campos vazios e a validação cobrava do Fábio, na etapa de orçamento, algo
+       que a admissão já tinha respondido. Aqui a resposta é deduzida do que
+       existe: tem acabamento escrito = Sim; não tem = Não. */
+    var _acab=p.acab||((p.acabamento&&String(p.acabamento).trim())?'Sim':'Não');
+    {const b=[].slice.call(pe.querySelectorAll('.acabseg button')).find(x=>x.dataset.v===_acab);if(b)b.click();}
     const ad=p.acabDados||{};
     let acTipos=[];
     if(ad.friso)acTipos.push('Friso'); if(ad.bombe)acTipos.push('Bombê');
@@ -2066,7 +2072,8 @@ function carregarParaEditar(id){
     // ---- acessórios ----
     let acItens=p.acessDados||[];
     if((!acItens||!acItens.length)&&p.acess){acItens=p.acess.split(',').map(s=>{s=s.trim();const m=s.match(/^(.*?)\s*\((\d+)\)$/);return m?{nome:m[1].trim(),qtd:m[2]}:{nome:s,qtd:''};}).filter(x=>x.nome);}
-    if(p.acessSN||(acItens&&acItens.length)){const b=[].slice.call(pe.querySelectorAll('.acessseg button')).find(x=>x.dataset.v===(p.acessSN||'Sim'));if(b)b.click();}
+    var _acess=p.acessSN||((acItens&&acItens.length)?'Sim':'Não'); // sem acessório na planilha = a resposta foi Não
+    {const b=[].slice.call(pe.querySelectorAll('.acessseg button')).find(x=>x.dataset.v===_acess);if(b)b.click();}
     (acItens||[]).forEach(it=>{const c=[].slice.call(pe.querySelectorAll('.xchip')).find(x=>x.dataset.xv===it.nome);if(c&&!c.classList.contains('on')){c.click();const i=pe.querySelector('.xq[data-xk="'+it.nome+'"]');if(i)i.value=it.qtd||'';}});
     set('p_acessoutros',p.acessOutros);
     // ---- inspeção visual ----
@@ -2093,7 +2100,9 @@ function carregarParaEditar(id){
     const est=p.estado||v.estado||'';
     if(est){const c=[].slice.call(pe.querySelectorAll('.echip')).find(x=>x.dataset.ev===est);if(c)c.click();}
     // ---- desenho ----
-    if(p.desenhoSN){const b=[].slice.call(pe.querySelectorAll('.deseg button')).find(x=>x.dataset.v===p.desenhoSN);if(b)b.click();}
+    // "Tem desenho?" não tem coluna na planilha: deduz pela foto do desenho
+    var _des=p.desenhoSN||(p.desenhoFoto?'Sim':'Não');
+    {const b=[].slice.call(pe.querySelectorAll('.deseg button')).find(x=>x.dataset.v===_des);if(b)b.click();}
     if(p.desenhoFoto){pecasState[pid].desenhoFoto=p.desenhoFoto;renderDesenho(pid);}
     // ---- fotos da peça ----
     if(p.fotosPeca&&p.fotosPeca.length){pecasState[pid].fotosPeca=p.fotosPeca.slice();renderPecaFotos(pid);}
