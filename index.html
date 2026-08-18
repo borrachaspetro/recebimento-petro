@@ -464,7 +464,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v8';
+const APP_VERSAO='v9';
 const APP_DATA='17/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1763,8 +1763,14 @@ function renderSaved(){
   /* O rótulo só volta para "Carregando" na PRIMEIRA vez. O Firebase chama esta
      função a cada aviso de outro aparelho, e resetar o rótulo a cada aviso
      deixava a tela presa em "Carregando planilha…" para sempre. */
-  renderFromArray(all,_origemAtual||(SHEET_URL?'⏳ Carregando planilha…':'Deste aparelho'),true);
-  if(typeof _fotosGarantirNuvem==='function') _fotosGarantirNuvem(all); // garante que as fotos deste aparelho subiram p/ todos
+  /* Cada etapa isolada: se a montagem da lista ou o envio de fotos der erro, a
+     leitura da planilha PRECISA acontecer mesmo assim. Antes um erro aqui
+     interrompia a função e o carregarNuvem() nunca era chamado — a tela ficava
+     em "Carregando planilha…" sem que nenhuma leitura tivesse sido pedida. */
+  try{ renderFromArray(all,_origemAtual||(SHEET_URL?'⏳ Carregando planilha…':'Deste aparelho'),true); }
+  catch(e){ console.error('[Petro] erro ao montar a lista:',e); }
+  try{ if(typeof _fotosGarantirNuvem==='function') _fotosGarantirNuvem(all); }
+  catch(e){ console.error('[Petro] erro no envio de fotos:',e); }
   if(SHEET_URL) carregarNuvem();
 }
 /* AUTO-REPARO DE ETAPA E STATUS
@@ -1868,8 +1874,17 @@ function carregarNuvem(tent){
       if(typeof window._ingestSheet==='function') window._ingestSheet(cloud); // grava os da planilha na memória e sobe p/ o Firebase
       _origemAtual='Planilha · todos os aparelhos';
       renderFromArray(merged,_origemAtual,true);
-      _reparoEnviar();
-    }catch(e){}
+      try{_reparoEnviar();}catch(e){console.error('[Petro] erro no reparo:',e);}
+    }catch(e){
+      /* A resposta CHEGOU (o teste da ⚙️ prova que a planilha responde), mas algo
+         na mesclagem estourou. Antes o erro era engolido e a tela ficava presa em
+         "Carregando planilha…" para sempre, dando a impressão de que a planilha
+         não respondia. Agora o erro aparece no console e a tela sai do limbo. */
+      console.error('[Petro] erro ao mesclar com a planilha:',e);
+      _origemAtual='Deste aparelho (erro ao mesclar)';
+      var lb=document.getElementById('origemLbl'); if(lb)lb.textContent=_origemAtual;
+      toast('Erro ao juntar os dados da planilha — avise a Suzana');
+    }
     delete window[cb]; const s2=document.getElementById(cb+'_s'); if(s2)s2.remove();};
   const s=document.createElement('script'); s.id=cb+'_s';
   s.src=SHEET_URL+(SHEET_URL.indexOf('?')<0?'?':'&')+'callback='+cb+'&k='+encodeURIComponent(CHAVE)+'&t='+Date.now();
