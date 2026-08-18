@@ -464,7 +464,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v9';
+const APP_VERSAO='v11';
 const APP_DATA='17/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1735,25 +1735,29 @@ function atualizarClientes(){
   try{arr.push(...JSON.parse(localStorage.getItem('petro_receb')||'[]'));}catch(e){}
   if(Array.isArray(LISTA_ATUAL))arr.push(...LISTA_ATUAL);
   _clientesMap={};
+  /* Tudo que vem da PLANILHA pode chegar como número (ex.: Cliente "3000",
+     Produto "60"), e número não tem .trim(). Era isso que derrubava a montagem
+     da lista inteira e prendia a tela em "Carregando planilha…". */
+  const _txt=v=>(v==null?'':String(v)).trim();
   arr.forEach(d=>{
-    const nome=((d&&d.cliente)||'').trim(); if(!nome)return;
+    const nome=_txt(d&&d.cliente); if(!nome)return;
     const k=nome.toLowerCase();
     if(!_clientesMap[k])_clientesMap[k]={nome:nome,contato:(d.contato||''),fone:(d.fone||'')};
     else{ if(!_clientesMap[k].contato&&d.contato)_clientesMap[k].contato=d.contato; if(!_clientesMap[k].fone&&d.fone)_clientesMap[k].fone=d.fone; }
   });
   const dl=document.getElementById('clientesLista');
-  if(dl)dl.innerHTML=Object.values(_clientesMap).sort((a,b)=>a.nome.localeCompare(b.nome))
-    .map(c=>'<option value="'+c.nome.replace(/"/g,'&quot;')+'">').join('');
+  if(dl)dl.innerHTML=Object.values(_clientesMap).sort((a,b)=>_txt(a.nome).localeCompare(_txt(b.nome)))
+    .map(c=>'<option value="'+_txt(c.nome).replace(/"/g,'&quot;')+'">').join('');
   // produtos (autocomplete da especificação)
   const prodSet={};
-  arr.forEach(d=>{(d&&d.pecas||[]).forEach(p=>{const nm=((p&&p.produto)||'').trim();if(nm&&nm.toUpperCase()!=='NA')prodSet[nm]=1;});});
+  arr.forEach(d=>{(d&&d.pecas||[]).forEach(p=>{const nm=_txt(p&&p.produto);if(nm&&nm.toUpperCase()!=='NA')prodSet[nm]=1;});});
   const pl=document.getElementById('produtosLista');
   if(pl)pl.innerHTML=Object.keys(prodSet).sort((a,b)=>a.localeCompare(b))
     .map(v=>'<option value="'+v.replace(/"/g,'&quot;')+'">').join('');
 }
 function _preencheCliente(){
   const el=document.getElementById('cliente'); if(!el)return;
-  const c=_clientesMap[(el.value||'').trim().toLowerCase()]; if(!c)return;
+  const c=_clientesMap[String(el.value||'').trim().toLowerCase()]; if(!c)return;
   const ct=document.getElementById('contato'), fn=document.getElementById('fone');
   if(ct&&!ct.value.trim())ct.value=c.contato||'';
   if(fn&&!fn.value.trim())fn.value=c.fone||'';
@@ -1923,7 +1927,8 @@ function filtrarLista(){
     if(STATUS_FILTRO==='pendentes'&&st==='Atendido')return false;
     if(STATUS_FILTRO==='atendidos'&&st!=='Atendido')return false;
     if(AREA_FILTRO!=='todas'&&(d.etapa||'comercial')!==AREA_FILTRO)return false;
-    if(q&&!((d.cliente||'').toLowerCase().includes(q)||(''+(d.nf||'')).toLowerCase().includes(q)))return false;
+    // String() aqui também: cliente/NF podem voltar da planilha como número
+    if(q&&!(String(d.cliente||'').toLowerCase().includes(q)||String(d.nf||'').toLowerCase().includes(q)))return false;
     return true;
   });
   arr.sort((a,b)=>(Number(b.id)||0)-(Number(a.id)||0)); // mais recente primeiro
@@ -2373,9 +2378,14 @@ try{var _cv=document.getElementById('codVer'); if(_cv)_cv.textContent='R 02-1 ·
 _limparFotosAntigas(30);
 _pendAtualiza();
 if(SHEET_URL)setTimeout(function(){filaEnviar(false);},2500); // sobe o que ficou pendente de sessões anteriores
-renderSaved();
-addPeca();
-atualizarClientes();
+/* Cada passo isolado. O formulário (addPeca) NÃO pode depender de a lista
+   carregar: era isto que deixava o item 7 sem nenhum campo de peça no celular —
+   renderSaved() estourava e a execução morria antes do addPeca(). */
+try{ renderSaved(); }catch(e){ console.error('[Petro] init renderSaved:',e); }
+try{ addPeca(); }catch(e){ console.error('[Petro] init addPeca:',e); }
+try{ atualizarClientes(); }catch(e){ console.error('[Petro] init atualizarClientes:',e); }
+// rede de segurança: se por qualquer motivo o item 7 ficou sem peça, cria uma
+try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){}
 </script>
 
 <!-- ════════ SYNC EM TEMPO REAL — FIREBASE (Petro) ════════
