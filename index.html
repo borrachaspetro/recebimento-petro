@@ -464,7 +464,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v13';
+const APP_VERSAO='v15';
 const APP_DATA='17/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1189,6 +1189,15 @@ function _atualizaEnvEmailInfo(){
   var em=_emailDaArea(_enviarDestino);
   document.getElementById('envEmailInfo').innerHTML= em? ('Vai para: <b>'+em+'</b>') : (_enviarDestino==='cliente'?'<span style="color:#C0392B">Digite o e-mail do cliente</span>':'<span style="color:#C0392B">Sem e-mail configurado para esta área (⚙️)</span>');
 }
+/* Prefixo do assunto do e-mail, para dar de bater o olho na caixa de entrada
+   em que ponto do fluxo o recebimento está. Definido com a Suzana em 18/08/2026.
+   O envio ao CLIENTE fica sem prefixo — é comunicação externa. */
+function _prefixoAssunto(dest,etapaAtual){
+  if(dest==='orcamento')return 'ORÇAMENTO PENDENTE — ';
+  if(dest==='comercial')return (etapaAtual==='orcamento')?'ORÇAMENTO FINALIZADO — ':'ADMISSÃO RECEBIDA — ';
+  if(dest==='admissao')return 'DEVOLVIDO PARA A ADMISSÃO — ';
+  return '';
+}
 function confirmarEnviar(){
   var id=_enviarId, dest=_enviarDestino;
   var d=(LISTA_ATUAL||[]).find(function(a){return String(a.id)===String(id);})||JSON.parse(localStorage.getItem('petro_receb')||'[]').find(function(a){return String(a.id)===String(id);});
@@ -1197,6 +1206,7 @@ function confirmarEnviar(){
   if(!to){toast(dest==='cliente'?'Digite o e-mail do cliente':'Configure o e-mail em ⚙️');return;}
   if(dest==='cliente'){ if(!/.+@.+\..+/.test(to)){toast('E-mail do cliente inválido');return;} _setCliEmail(d.cliente,to); }
   var anexar=document.getElementById('envAnexo').checked;
+  var _etapaAnt=d.etapa||'comercial'; // capturar ANTES de trocar a etapa abaixo
   var now=Date.now();
   var arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');
   arr.forEach(function(a){if(String(a.id)===String(id)){ if(dest!=='cliente')a.etapa=dest; a.jaEnviado=true; a.updatedAt=now; }});
@@ -1207,7 +1217,7 @@ function confirmarEnviar(){
   if(dest!=='cliente'&&SHEET_URL)postSheet(SHEET_URL,{action:'etapa',id:id,etapa:dest});
   if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
   var nomeArea=AREAS[dest].nome;
-  var assunto=_tituloFicha(d);
+  var assunto=_prefixoAssunto(dest,_etapaAnt)+_tituloFicha(d);
   var intro=(dest==='orcamento'?'Segue a ficha para orçamento (preencher Molde/Fórmula/Peso/Preço no app):':(dest==='admissao'?'Recebimento devolvido à admissão para corrigir/completar:':(dest==='cliente'?'Segue a confirmação do recebimento do seu material na Borrachas Petro:':'Recebimento para o comercial conferir/completar no app:')));
   fecharEnviar();
   function mandar(dd){
@@ -1364,7 +1374,7 @@ function gerarRelatorio(d){
     x.fillText('R 02-1 · App de Recebimento · Borrachas Petro · '+d.criado,W/2,H-20);x.textAlign='left';
     if(SHEET_URL&&EMAIL_COM){
       const b64=cv.toDataURL('image/jpeg',0.85);
-      postSheet(SHEET_URL,{action:'email',to:EMAIL_COM,assunto:'Recebimento — '+(d.cliente||'')+' ('+fmtData(d.data)+')',resumo:montarTexto(d),arquivo:b64,nome:'Recebimento_'+(d.cliente||'rolo').replace(/\s/g,'_')+'.jpg'});
+      postSheet(SHEET_URL,{action:'email',to:EMAIL_COM,assunto:'ADMISSÃO RECEBIDA — '+_tituloFicha(d),resumo:montarTexto(d),arquivo:b64,nome:'Recebimento_'+(d.cliente||'rolo').replace(/\s/g,'_')+'.jpg'});
       toast('Enviado por e-mail ao comercial'); return;
     }
     cv.toBlob(blob=>{
@@ -1588,7 +1598,7 @@ function enviarOrcamento(id){
       if(SHEET_URL){
         var datauri=doc.output('datauristring');
         postSheet(SHEET_URL,{action:'email',to:EMAIL_ORC,mime:'application/pdf',nome:nome,
-          assunto:'Ficha para orçamento — '+(dd.cliente||'')+' (NF '+(dd.nf||'—')+')',
+          assunto:'ORÇAMENTO PENDENTE — '+_tituloFicha(dd),
           resumo:'Segue a ficha de recebimento para orçamento.\n\n'+montarTexto(dd),
           arquivo:datauri});
         _marcarPdfEnviado(id);
@@ -1631,7 +1641,7 @@ function orcamentoPronto(id){
   if(SHEET_URL)postSheet(SHEET_URL,{action:'etapa',id:id,etapa:'comercial'}); // grava a volta na planilha
   if(SHEET_URL&&EMAIL_COM){
     postSheet(SHEET_URL,{action:'email',to:EMAIL_COM,
-      assunto:'Orçamento pronto — '+(d.cliente||'')+' (NF '+(d.nf||'—')+')',
+      assunto:'ORÇAMENTO FINALIZADO — '+_tituloFicha(d),
       resumo:'O orçamento foi preenchido e está pronto para lançar no Naphta:\n\n'+_resumoOrc(d)});
   }
   if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
@@ -2015,7 +2025,12 @@ function reabrir(id){
   if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
   renderFromArray(LISTA_ATUAL,document.getElementById('origemLbl').textContent,ACOES_ATUAL);toast('Reaberto — voltou para pendente');
 }
-function setV(id,v){const e=document.getElementById(id);if(e)e.value=v||'';}
+/* v||'' apaga o valor quando ele é o NÚMERO ZERO — em JavaScript 0 conta como
+   vazio. Como há dezenas de recebimentos com Produto = 0, o campo chegava em
+   branco ao editar e a validação pintava de vermelho um campo que estava
+   preenchido. _v() só trata nulo e vazio de verdade como vazio. */
+function _v(v){return (v===null||v===undefined||v==='')?'':String(v);}
+function setV(id,v){const e=document.getElementById(id);if(e)e.value=_v(v);}
 function descPart(s){const p=(s||'').split(' — ');return p.length>1?p.slice(1).join(' — '):'';}
 function selSeg(id,v){if(!v)return;const b=[].slice.call(document.querySelectorAll('#'+id+' button')).find(x=>x.dataset.v===v);if(b)b.click();}
 function splitSelSeg(id,val,descId){selSeg(id,(val||'').split(' — ')[0]);if(descId)setV(descId,descPart(val));}
@@ -2046,7 +2061,7 @@ function carregarParaEditar(id){
   (d.pecas&&d.pecas.length?d.pecas:[{}]).forEach(p=>{
     addPeca();
     const els=document.querySelectorAll('.peca');const pe=els[els.length-1];
-    const set=(cls,v)=>{const i=pe.querySelector('.'+cls);if(i)i.value=v||'';};
+    const set=(cls,v)=>{const i=pe.querySelector('.'+cls);if(i)i.value=_v(v);}; // preserva o zero
     set('p_dint',p.dint);set('p_dextsol',p.dextsol);set('p_dextmed',p.dextmed);set('p_areautil',p.areautil);
     set('p_compsol',p.compsol);set('p_compmed',p.compmed);set('p_produto',p.produto);
     set('p_qtde',p.qtde);set('p_durmed',p.durmed);set('p_dursol',p.dursol);set('p_peso',p.peso);
