@@ -464,7 +464,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v15';
+const APP_VERSAO='v16';
 const APP_DATA='17/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1193,8 +1193,8 @@ function _atualizaEnvEmailInfo(){
    em que ponto do fluxo o recebimento está. Definido com a Suzana em 18/08/2026.
    O envio ao CLIENTE fica sem prefixo — é comunicação externa. */
 function _prefixoAssunto(dest,etapaAtual){
-  if(dest==='orcamento')return 'ORÇAMENTO PENDENTE — ';
-  if(dest==='comercial')return (etapaAtual==='orcamento')?'ORÇAMENTO FINALIZADO — ':'ADMISSÃO RECEBIDA — ';
+  if(dest==='orcamento')return 'CUSTO PENDENTE — ';
+  if(dest==='comercial')return (etapaAtual==='orcamento')?'CUSTO FINALIZADO — ':'ADMISSÃO RECEBIDA — ';
   if(dest==='admissao')return 'DEVOLVIDO PARA A ADMISSÃO — ';
   return '';
 }
@@ -1598,7 +1598,7 @@ function enviarOrcamento(id){
       if(SHEET_URL){
         var datauri=doc.output('datauristring');
         postSheet(SHEET_URL,{action:'email',to:EMAIL_ORC,mime:'application/pdf',nome:nome,
-          assunto:'ORÇAMENTO PENDENTE — '+_tituloFicha(dd),
+          assunto:'CUSTO PENDENTE — '+_tituloFicha(dd),
           resumo:'Segue a ficha de recebimento para orçamento.\n\n'+montarTexto(dd),
           arquivo:datauri});
         _marcarPdfEnviado(id);
@@ -1641,7 +1641,7 @@ function orcamentoPronto(id){
   if(SHEET_URL)postSheet(SHEET_URL,{action:'etapa',id:id,etapa:'comercial'}); // grava a volta na planilha
   if(SHEET_URL&&EMAIL_COM){
     postSheet(SHEET_URL,{action:'email',to:EMAIL_COM,
-      assunto:'ORÇAMENTO FINALIZADO — '+_tituloFicha(d),
+      assunto:'CUSTO FINALIZADO — '+_tituloFicha(d),
       resumo:'O orçamento foi preenchido e está pronto para lançar no Naphta:\n\n'+_resumoOrc(d)});
   }
   if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
