@@ -464,7 +464,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v17';
+const APP_VERSAO='v18';
 const APP_DATA='25/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -983,6 +983,13 @@ function formatMoeda(el){
   var n=parseFloat(v); if(isNaN(n)){el.value='';return;}
   el.value='R$ '+n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
+/* Texto da coluna "Frisado": "Horizontal (larg 20mm, prof 5mm, qtd 3)".
+   Legível para quem abrir a planilha e reversível para o app (_acabDeReg). */
+function _frisoTexto(f){
+  if(!f||!f.tipo)return '';
+  var d=[]; if(f.larg)d.push('larg '+f.larg+'mm'); if(f.prof)d.push('prof '+f.prof+'mm'); if(f.qtd)d.push('qtd '+f.qtd);
+  return f.tipo+(d.length?(' ('+d.join(', ')+')'):'');
+}
 function coletarPecas(){
   const out=[];
   document.querySelectorAll('.peca').forEach(p=>{
@@ -1050,6 +1057,16 @@ function coletarPecas(){
       compsol:g('p_compsol'),compmed:g('p_compmed'),produto:g('p_produto'),
       qtde:g('p_qtde'),durmed:g('p_durmed'),dursol:g('p_dursol'),
       acab:acab,acabamento:acabamento,acabDados:acabDados,
+      /* COLUNAS "Frisado" (AA) e "Bombê" (Z) DA PLANILHA — 25/08/2026
+         Elas existem no CABECALHO desde sempre e estavam SEMPRE VAZIAS: o
+         Code.gs grava `p.frisado` e `p.bombe`, campos que o app deixou de
+         produzir quando o acabamento virou o objeto acabDados. Resultado: o
+         tipo de friso só sobrevivia dentro do texto do acabamento e morria a
+         cada ida-e-volta pela planilha. Preenchendo esses dois campos aqui, o
+         dado passa a ter coluna própria — sem mexer no Code.gs, porque ele já
+         grava (gravar_) e já devolve (doGetInterno_: r[26] e r[25]) os dois. */
+      frisado:_frisoTexto(acabDados.friso),
+      bombe:(acabDados.bombe&&acabDados.bombe.comp)?('comp '+acabDados.bombe.comp+'mm'):'',
       acessSN:acessSN,acess:acess,acessDados:acessItens,acessOutros:acessOutros,
       peso:g('p_peso'),
       molde:g('p_molde'),formula:g('p_formula'),pesoOrc:g('p_pesoorc'),preco:g('p_preco'),
@@ -1253,7 +1270,18 @@ function coletar(pecas){
     etapa:prev.etapa||'comercial', jaEnviado:prev.jaEnviado||false,
     resp:val('resp'),data:val('data'),cliente:val('cliente'),contato:val('contato'),fone:val('fone'),
     transp:sel.transp+(sel.transp==='Transportadora'||sel.transp==='Outros'?(' — '+val('transpDesc')):''),
-    nf:val('nf'),nfdiv:sel.nfdiv,nfQtdeNota:val('nfQtdeNota'),nfQtdeReceb:val('nfQtdeReceb'),
+    /* QTDE DA NOTA x RECEBIDA — 25/08/2026
+       Os dois campos são OBRIGATÓRIOS quando há divergência, mas não têm coluna
+       nenhuma na planilha. Todo registro que voltava pela planilha chegava sem
+       eles e a validação cobrava do comercial/orçamento números que só quem
+       recebeu a carga tinha. Como "Divergências NF" (coluna J) é gravada e lida,
+       a resposta passa a levar os números junto: "Sim — nota 10 / recebida 8".
+       A leitura já fazia split(' — '), então o "Sim" continua sendo reconhecido,
+       e o relatório/PDF já imprimiam exatamente esse texto. */
+    nf:val('nf'),
+    nfdiv:sel.nfdiv+((sel.nfdiv==='Sim'&&(val('nfQtdeNota')||val('nfQtdeReceb')))
+      ?(' — nota '+(val('nfQtdeNota')||'?')+' / recebida '+(val('nfQtdeReceb')||'?')):''),
+    nfQtdeNota:val('nfQtdeNota'),nfQtdeReceb:val('nfQtdeReceb'),
     embTipo:[...embTipoSel].map(t=>t==='Outros'?('Outros — '+val('embTipoDesc')):t).join(', '),
     embCond:sel.embCond,embConserto:sel.embConserto,embNovaCaixa:sel.embNovaCaixa,
     servico:sel.servico+(sel.servico==='Outros'?(' — '+val('servicoDesc')):''),confcli:sel.confcli,
@@ -2096,6 +2124,25 @@ function _acabDoTexto(txt){
   });
   return ad;
 }
+/* Melhor fonte disponível do acabamento, nesta ordem:
+   1) acabDados — objeto completo, veio do aparelho ou do Firebase;
+   2) colunas "Frisado" (AA) e "Bombê" (Z) da planilha — dado exato, coluna própria;
+   3) texto do acabamento — último recurso, para registros gravados antes da v18. */
+function _acabDeReg(p){
+  if(!p)return {};
+  if(p.acabDados&&Object.keys(p.acabDados).length)return p.acabDados;
+  var ad=_acabDoTexto(p.acabamento);
+  var fr=_v(p.frisado).trim();
+  if(fr){
+    var mf=fr.match(/^([^(]*)(?:\(([^)]*)\))?/), dentro=(mf&&mf[2])?mf[2]:'';
+    var n=function(rot){ var x=dentro.match(new RegExp(rot+'\\s*([\\d.,]+)','i')); return x?x[1]:''; };
+    var f=ad.friso||{};
+    ad.friso={tipo:(mf&&mf[1]?mf[1].trim():'')||f.tipo||'',larg:f.larg||n('larg'),prof:f.prof||n('prof'),qtd:f.qtd||n('qtd')};
+  }
+  var bo=_v(p.bombe).trim();
+  if(bo){ var mb=bo.match(/([\d.,]+)/); ad.bombe={comp:(ad.bombe&&ad.bombe.comp)||(mb?mb[1]:'')}; }
+  return ad;
+}
 /* Devolve ao registro os campos ESTRUTURADOS que a planilha não guarda.
    A planilha carimba "Atualizado em" a cada mudança de status/etapa, então a
    linha dela vira "a mais nova" e substituía o registro completo do aparelho
@@ -2125,7 +2172,13 @@ function carregarParaEditar(id){
   if(d.nf==='SEM NOTA'){var _sn=document.getElementById('nfSemNota');if(_sn){_sn.checked=true;toggleSemNota();}}
   splitSel('transp',d.transp,'transpDesc');
   selSeg('nfdiv',(d.nfdiv||'').split(' — ')[0]);
-  setV('nfQtdeNota',d.nfQtdeNota);setV('nfQtdeReceb',d.nfQtdeReceb);
+  // registro vindo da planilha: recupera as quantidades de dentro do texto
+  var _qn=_v(d.nfQtdeNota),_qr=_v(d.nfQtdeReceb);
+  if(!_qn&&!_qr){
+    var _mq=String(d.nfdiv||'').match(/nota\s*([^\/]*?)\s*\/\s*recebida\s*(.*)$/i);
+    if(_mq){ _qn=_mq[1].trim(); _qr=_mq[2].trim(); }
+  }
+  setV('nfQtdeNota',_qn==='?'?'':_qn);setV('nfQtdeReceb',_qr==='?'?'':_qr);
   (d.embTipo||'').split(', ').filter(Boolean).forEach(t=>{
     const base=t.split(' — ')[0];
     const chip=[].slice.call(document.querySelectorAll('#embTipo .chip')).find(c=>c.dataset.v===base);
@@ -2156,9 +2209,7 @@ function carregarParaEditar(id){
        existe: tem acabamento escrito = Sim; não tem = Não. */
     var _acab=p.acab||((p.acabamento&&String(p.acabamento).trim())?'Sim':'Não');
     {const b=[].slice.call(pe.querySelectorAll('.acabseg button')).find(x=>x.dataset.v===_acab);if(b)b.click();}
-    var ad=p.acabDados;
-    if(!ad||!Object.keys(ad).length) ad=_acabDoTexto(p.acabamento); // veio da planilha: lê de volta do texto
-    ad=ad||{};
+    var ad=_acabDeReg(p)||{}; // aparelho > colunas Frisado/Bombê > texto do acabamento
     let acTipos=[];
     if(ad.friso)acTipos.push('Friso'); if(ad.bombe)acTipos.push('Bombê');
     if(ad.ressalto)acTipos.push('Ressalto'); if(ad.rebaixo)acTipos.push('Rebaixo');
@@ -2174,10 +2225,22 @@ function carregarParaEditar(id){
     // ---- acessórios ----
     let acItens=p.acessDados||[];
     if((!acItens||!acItens.length)&&p.acess){acItens=p.acess.split(',').map(s=>{s=s.trim();const m=s.match(/^(.*?)\s*\((\d+)\)$/);return m?{nome:m[1].trim(),qtd:m[2]}:{nome:s,qtd:''};}).filter(x=>x.nome);}
+    /* ACESSÓRIO "OUTROS" — 25/08/2026
+       Na planilha o item vira "Outros: manopla (2)". Ao voltar, o nome lido era
+       "Outros: manopla", que não casa com nenhum chip (data-xv="Outros"): o chip
+       não era marcado, o "qual?" ficava vazio e a validação cobrava "escolher o
+       acessório" — de novo, para quem já tinha respondido. Aqui o prefixo é
+       separado do texto, e o texto volta para o campo "Qual?". */
+    var _acessOutros='';
+    acItens=(acItens||[]).map(function(it){
+      var mo=String(it&&it.nome||'').match(/^Outros\s*:\s*(.+)$/i);
+      if(mo){ _acessOutros=mo[1].trim(); return {nome:'Outros',qtd:it.qtd||''}; }
+      return it;
+    });
     var _acess=p.acessSN||((acItens&&acItens.length)?'Sim':'Não'); // sem acessório na planilha = a resposta foi Não
     {const b=[].slice.call(pe.querySelectorAll('.acessseg button')).find(x=>x.dataset.v===_acess);if(b)b.click();}
     (acItens||[]).forEach(it=>{const c=[].slice.call(pe.querySelectorAll('.xchip')).find(x=>x.dataset.xv===it.nome);if(c&&!c.classList.contains('on')){c.click();const i=pe.querySelector('.xq[data-xk="'+it.nome+'"]');if(i)i.value=it.qtd||'';}});
-    set('p_acessoutros',p.acessOutros);
+    set('p_acessoutros',_v(p.acessOutros)||_acessOutros);
     // ---- inspeção visual ----
     const pid=+pe.id.split('-')[1];
     const v=p.visual||{};
@@ -2226,7 +2289,16 @@ function _reaplicarFotosForm(dd){
   (dd.pecas||[]).forEach(function(p,i){
     var pe=pes[i]; if(!pe)return; var pid=+pe.id.split('-')[1]; var st=pecasState[pid]; if(!st)return;
     if(p.fotosPeca&&p.fotosPeca.length){ st.fotosPeca=p.fotosPeca.slice(); renderPecaFotos(pid); }
-    if(p.desenhoFoto&&!st.desenhoFoto){ st.desenhoFoto=p.desenhoFoto; renderDesenho(pid); }
+    /* "Tem desenho?" não tem coluna na planilha — é deduzido pela existência da
+       foto. Como a foto só chega da nuvem DEPOIS que o formulário abre, todo
+       registro vindo da planilha era aberto como "Não" e, ao salvar, gravava
+       "Não" por cima de um "Sim" verdadeiro. Quando a foto chega, a resposta
+       volta para Sim. */
+    if(p.desenhoFoto&&!st.desenhoFoto){
+      st.desenhoFoto=p.desenhoFoto; renderDesenho(pid);
+      var bs=[].slice.call(pe.querySelectorAll('.deseg button')).find(function(x){return x.dataset.v==='Sim';});
+      if(bs&&!bs.classList.contains('on'))bs.click();
+    }
     if(p.ponteiras&&st.pt&&st.pt.length){ p.ponteiras.forEach(function(x,j){ if(st.pt[j]&&x&&x.foto&&!st.pt[j].foto)st.pt[j].foto=x.foto; }); renderSubList(pid,'pt'); }
     if(p.furos&&st.fc&&st.fc.length){ p.furos.forEach(function(x,j){ if(st.fc[j]&&x&&x.foto&&!st.fc[j].foto)st.fc[j].foto=x.foto; }); renderSubList(pid,'fc'); }
   });
