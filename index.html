@@ -464,8 +464,8 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v16';
-const APP_DATA='17/08/2026';
+const APP_VERSAO='v17';
+const APP_DATA='25/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
 let SHEET_URL=localStorage.getItem('petro_sheetUrl')||SHEET_URL_PADRAO;
@@ -1155,7 +1155,17 @@ function openEnviar(id){
   var chk=document.getElementById('envAnexo'), fixo=document.getElementById('envAnexoFixo');
   if(_enviarPrimeiro){ chk.checked=true; chk.disabled=true; fixo.style.display='block'; }
   else { chk.checked=false; chk.disabled=false; fixo.style.display='none'; }
-  var destino=_enviarPrimeiro?'comercial':((d.etapa==='admissao'||d.etapa==='comercial'||d.etapa==='orcamento')?d.etapa:'comercial');
+  /* DESTINO PADRÃO (25/08/2026)
+     Antes o destino já vinha marcado na PRÓPRIA etapa do recebimento: um item em
+     Orçamento abria com "Orçamento" selecionado. Quem acabava de orçar e só
+     conferia antes de tocar Enviar devolvia o item para a própria fila — ele
+     nunca saía de "Pendente Orçamento". Agora, se a etapa é Orçamento e o
+     orçamento JÁ está preenchido (molde/fórmula/peso/preço em alguma peça), o
+     padrão passa a ser Comercial, que é para onde o trabalho segue. */
+  var _orcFeito=((d.pecas||[]).some(function(p){return !!(p&&(p.molde||p.formula||p.pesoOrc||p.preco));}));
+  var destino=_enviarPrimeiro?'comercial'
+    :((d.etapa==='orcamento'&&_orcFeito)?'comercial'
+    :((d.etapa==='admissao'||d.etapa==='comercial'||d.etapa==='orcamento')?d.etapa:'comercial'));
   _selEnvDestino(destino);
   document.getElementById('enviarModal').classList.add('show');
 }
@@ -1209,9 +1219,9 @@ function confirmarEnviar(){
   var _etapaAnt=d.etapa||'comercial'; // capturar ANTES de trocar a etapa abaixo
   var now=Date.now();
   var arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');
-  arr.forEach(function(a){if(String(a.id)===String(id)){ if(dest!=='cliente')a.etapa=dest; a.jaEnviado=true; a.updatedAt=now; }});
+  arr.forEach(function(a){if(String(a.id)===String(id)){ if(dest!=='cliente'){a.etapa=dest;a.etapaEm=now;} a.jaEnviado=true; a.updatedAt=now; }});
   try{localStorage.setItem('petro_receb',JSON.stringify(arr));}catch(e){}
-  (LISTA_ATUAL||[]).forEach(function(a){if(String(a.id)===String(id)){ if(dest!=='cliente')a.etapa=dest; a.jaEnviado=true; a.updatedAt=now; }});
+  (LISTA_ATUAL||[]).forEach(function(a){if(String(a.id)===String(id)){ if(dest!=='cliente'){a.etapa=dest;a.etapaEm=now;} a.jaEnviado=true; a.updatedAt=now; }});
   // grava a etapa NA PLANILHA também. Sem isto a mudança só existia neste aparelho
   // (e no Firebase) — quem lia pela planilha via tudo como "Pendente Comercial".
   if(dest!=='cliente'&&SHEET_URL)postSheet(SHEET_URL,{action:'etapa',id:id,etapa:dest});
@@ -1635,9 +1645,9 @@ function orcamentoPronto(id){
      pronto: o comercial recebia o e-mail mas não via o item voltar na tela, e
      quem fecha o pedido é o comercial. */
   var arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');
-  arr.forEach(function(a){if(String(a.id)===String(id)){a.orcPronto=true;a.orcProntoEm=now;a.etapa='comercial';a.updatedAt=now;}});
+  arr.forEach(function(a){if(String(a.id)===String(id)){a.orcPronto=true;a.orcProntoEm=now;a.etapa='comercial';a.etapaEm=now;a.updatedAt=now;}});
   try{localStorage.setItem('petro_receb',JSON.stringify(arr));}catch(e){}
-  (LISTA_ATUAL||[]).forEach(function(a){if(String(a.id)===String(id)){a.orcPronto=true;a.orcProntoEm=now;a.etapa='comercial';a.updatedAt=now;}});
+  (LISTA_ATUAL||[]).forEach(function(a){if(String(a.id)===String(id)){a.orcPronto=true;a.orcProntoEm=now;a.etapa='comercial';a.etapaEm=now;a.updatedAt=now;}});
   if(SHEET_URL)postSheet(SHEET_URL,{action:'etapa',id:id,etapa:'comercial'}); // grava a volta na planilha
   if(SHEET_URL&&EMAIL_COM){
     postSheet(SHEET_URL,{action:'email',to:EMAIL_COM,
@@ -1869,6 +1879,19 @@ function carregarNuvem(tent){
           var vLocal=r[campo]||padrao, vNuvem=c[campo]||padrao;
           if(vLocal===vNuvem)return;
           if(_pf[k+'|'+campo])return;
+          /* CLIQUE AINDA NÃO CONFIRMADO (25/08/2026)
+             r.statusEm / r.etapaEm guardam a hora em que alguém clicou AQUI.
+             Se a planilha ainda não foi carimbada depois desse clique, é porque
+             a gravação não chegou — o envio é 'no-cors' e falha calado. Nesse
+             caso o aparelho segura o valor dele E reenvia o comando, em vez de
+             deixar a planilha desfazer a ação na cara do usuário. Assim que a
+             planilha registrar, ela volta a mandar (regra abaixo, inalterada). */
+          var _clique=r[campo+'Em']||0;
+          if(_clique&&(c.updatedAt||0)<_clique){
+            venceu[campo]=vLocal;
+            var itR={action:campo,id:r.id}; itR[campo]=vLocal; _reparoPend.push(itR);
+            return;
+          }
           /* STATUS: a planilha SEMPRE manda. Conferido na planilha de 17/08/2026 —
              os 119 atendidos têm todos a data em "Atendido em", ou seja, o caminho
              do Atendido para a planilha sempre funcionou. Tratar o status igual à
@@ -1890,6 +1913,7 @@ function carregarNuvem(tent){
         });
       });
       var merged=Object.keys(map).map(function(k){return map[k];});
+      _preservarAcab(local,merged); // planilha não guarda o tipo de friso/medidas — repõe do aparelho
       if(typeof window._ingestSheet==='function') window._ingestSheet(cloud); // grava os da planilha na memória e sobe p/ o Firebase
       _origemAtual='Planilha · todos os aparelhos';
       renderFromArray(merged,_origemAtual,true);
@@ -2006,21 +2030,30 @@ function excluirRec(id){
   if(SHEET_URL)postSheet(SHEET_URL,{action:'excluir',id:id});
   renderFromArray(LISTA_ATUAL,document.getElementById('origemLbl').textContent,ACOES_ATUAL);toast('Excluído');
 }
+/* statusEm / etapaEm = a HORA DO CLIQUE neste aparelho.
+   O envio para a planilha é 'no-cors': o app dispara e nunca fica sabendo se
+   gravou. Sem esse carimbo, uma gravação que não chegou fazia a leitura
+   seguinte devolver "Pendente" e o app apagava o Concluído da tela sem avisar
+   ninguém. Com o carimbo, o aparelho só entrega o comando para a planilha
+   depois que ela mostrar que foi carimbada DEPOIS do clique (ver mesclagem). */
 function marcarAtendido(id){
   if(!confirm('Marcar como ATENDIDO e finalizar este recebimento?'))return;
+  var now=Date.now();
   let arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');
-  arr.forEach(a=>{if(String(a.id)===String(id))a.status='Atendido';});
+  arr.forEach(a=>{if(String(a.id)===String(id)){a.status='Atendido';a.statusEm=now;a.updatedAt=now;}});
   localStorage.setItem('petro_receb',JSON.stringify(arr));
-  LISTA_ATUAL.forEach(a=>{if(String(a.id)===String(id))a.status='Atendido';});
+  LISTA_ATUAL.forEach(a=>{if(String(a.id)===String(id)){a.status='Atendido';a.statusEm=now;a.updatedAt=now;}});
   if(SHEET_URL)postSheet(SHEET_URL,{action:'status',id:id,status:'Atendido'});
+  if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
   renderFromArray(LISTA_ATUAL,document.getElementById('origemLbl').textContent,ACOES_ATUAL);toast('Marcado como atendido');
 }
 function reabrir(id){
   if(!confirm('Reabrir este recebimento? Ele volta para PENDENTE (desmarca o Concluído).'))return;
+  var now=Date.now();
   let arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');
-  arr.forEach(a=>{if(String(a.id)===String(id)){a.status='Pendente';a.atendidoEm='';a.updatedAt=Date.now();}});
+  arr.forEach(a=>{if(String(a.id)===String(id)){a.status='Pendente';a.statusEm=now;a.atendidoEm='';a.updatedAt=now;}});
   try{localStorage.setItem('petro_receb',JSON.stringify(arr));}catch(e){}
-  LISTA_ATUAL.forEach(a=>{if(String(a.id)===String(id)){a.status='Pendente';a.atendidoEm='';}});
+  LISTA_ATUAL.forEach(a=>{if(String(a.id)===String(id)){a.status='Pendente';a.statusEm=now;a.atendidoEm='';a.updatedAt=now;}});
   if(SHEET_URL)postSheet(SHEET_URL,{action:'status',id:id,status:'Pendente'});
   if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
   renderFromArray(LISTA_ATUAL,document.getElementById('origemLbl').textContent,ACOES_ATUAL);toast('Reaberto — voltou para pendente');
@@ -2036,6 +2069,53 @@ function selSeg(id,v){if(!v)return;const b=[].slice.call(document.querySelectorA
 function splitSelSeg(id,val,descId){selSeg(id,(val||'').split(' — ')[0]);if(descId)setV(descId,descPart(val));}
 function selChip(id,v){if(!v)return;const c=[].slice.call(document.querySelectorAll('#'+id+' .chip')).find(x=>x.dataset.v===v);if(c)c.click();}
 function splitSel(id,val,descId){selChip(id,(val||'').split(' — ')[0]);if(descId)setV(descId,descPart(val));}
+/* RECONSTRUIR O ACABAMENTO A PARTIR DO TEXTO (25/08/2026)
+   A planilha guarda o acabamento só como TEXTO — "Friso (tipo Horizontal, larg
+   20mm, prof 5mm, qtd 3); Bombê (comp 40mm)". O objeto acabDados, que é de onde
+   o campo "Tipo" do friso é repreenchido, NÃO tem coluna na planilha. Então
+   todo registro que voltava pela planilha chegava com o Tipo em branco: o app
+   remarcava o chip "Friso" pelo texto, o select ficava vazio e a validação
+   cobrava de novo um tipo que o Fábio já tinha escolhido. Aqui o texto é lido
+   de volta para o objeto, e o campo reaparece preenchido.
+   Só é usado quando acabDados não veio — nunca sobrepõe o dado original. */
+function _acabDoTexto(txt){
+  var ad={}; if(!txt)return ad;
+  String(txt).split(';').forEach(function(raw){
+    var s=raw.trim(); if(!s)return;
+    if(/^A confirmar/i.test(s)){ ad.confirmar=true; return; }
+    if(/^Outros/i.test(s)){ var pt=s.split('—'); ad.outros=(pt.length>1?pt.slice(1).join('—').trim():''); return; }
+    var par=s.match(/\(([^)]*)\)/), dentro=par?par[1]:'';
+    var num=function(rot){ var m=dentro.match(new RegExp(rot+'\\s*([\\d.,]+)','i')); return m?m[1]:''; };
+    if(/^Friso/i.test(s)){
+      var mt=dentro.match(/tipo\s*([^,]+)/i);
+      ad.friso={tipo:mt?mt[1].trim():'',larg:num('larg'),prof:num('prof'),qtd:num('qtd')};
+    }
+    else if(/^Bomb/i.test(s))     ad.bombe={comp:num('comp')};
+    else if(/^Ressalto/i.test(s)) ad.ressalto={comp:num('comp'),diam:num('(?:Ø|diam\\.?)')};
+    else if(/^Rebaixo/i.test(s))  ad.rebaixo={comp:num('comp'),diam:num('(?:Ø|diam\\.?)')};
+  });
+  return ad;
+}
+/* Devolve ao registro os campos ESTRUTURADOS que a planilha não guarda.
+   A planilha carimba "Atualizado em" a cada mudança de status/etapa, então a
+   linha dela vira "a mais nova" e substituía o registro completo do aparelho
+   por uma versão pobre — apagando acabDados (tipo de friso e medidas) em todos
+   os aparelhos, via Firebase. Mesma ideia do _preservarFotos. */
+function _preservarAcab(local,merged){
+  var m={}; (local||[]).forEach(function(r){ if(r&&r.id!=null)m[r.id]=r; });
+  (merged||[]).forEach(function(r){
+    if(!r||r.id==null||!r.pecas)return;
+    var lr=m[r.id]; if(!lr||!lr.pecas)return;
+    r.pecas.forEach(function(p,i){
+      var lp=lr.pecas[i]; if(!p||!lp)return;
+      if(!p.acabDados||!Object.keys(p.acabDados).length){ if(lp.acabDados&&Object.keys(lp.acabDados).length)p.acabDados=lp.acabDados; }
+      if((!p.acessDados||!p.acessDados.length)&&lp.acessDados&&lp.acessDados.length)p.acessDados=lp.acessDados;
+      if(!p.acab&&lp.acab)p.acab=lp.acab;
+      if(!p.acessSN&&lp.acessSN)p.acessSN=lp.acessSN;
+      if(!p.desenhoSN&&lp.desenhoSN)p.desenhoSN=lp.desenhoSN;
+    });
+  });
+}
 function carregarParaEditar(id){
   const d=LISTA_ATUAL.find(x=>String(x.id)===String(id));
   if(!d){toast('Registro não encontrado');return;}
@@ -2076,7 +2156,9 @@ function carregarParaEditar(id){
        existe: tem acabamento escrito = Sim; não tem = Não. */
     var _acab=p.acab||((p.acabamento&&String(p.acabamento).trim())?'Sim':'Não');
     {const b=[].slice.call(pe.querySelectorAll('.acabseg button')).find(x=>x.dataset.v===_acab);if(b)b.click();}
-    const ad=p.acabDados||{};
+    var ad=p.acabDados;
+    if(!ad||!Object.keys(ad).length) ad=_acabDoTexto(p.acabamento); // veio da planilha: lê de volta do texto
+    ad=ad||{};
     let acTipos=[];
     if(ad.friso)acTipos.push('Friso'); if(ad.bombe)acTipos.push('Bombê');
     if(ad.ressalto)acTipos.push('Ressalto'); if(ad.rebaixo)acTipos.push('Rebaixo');
@@ -2475,6 +2557,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
     var local = _getReceb();
     var merged = _mesclar(local, d.receb, todas);
     _preservarFotos(local, merged); // fotos não trafegam pelo Firebase — mantém as locais
+    if(typeof _preservarAcab==='function')_preservarAcab(local, merged); // e o acabamento estruturado
     // funde as lápides novas da nuvem
     var vistas={}; tumbasLocal.forEach(function(t){vistas[t.id+'|'+t.ts]=1;});
     tumbasNuvem.forEach(function(t){ if(t&&t.id!=null&&!vistas[t.id+'|'+t.ts]) tumbasLocal.push(t); });
@@ -2536,6 +2619,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       var seen={}, mergedTumbas=[];
       tumbas.forEach(function(t){ if(t&&t.id!=null){ var k=t.id+'|'+t.ts; if(!seen[k]){ seen[k]=1; mergedTumbas.push(t); } } });
       _preservarFotos(receb, mergedReceb); // mantém as fotos locais no que voltou da nuvem
+      if(typeof _preservarAcab==='function')_preservarAcab(receb, mergedReceb); // e o acabamento estruturado
       _fbAplicando=true;
       try{ localStorage.setItem(KEY, JSON.stringify(mergedReceb)); }catch(e){}
       _setTumbas(mergedTumbas);
@@ -2584,6 +2668,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       var local=_getReceb();
       var merged=_mesclar(local, cloudArr, _getTumbas()); // planilha entra; local (mais novo) prevalece; lápides removem
       _preservarFotos(local, merged);                     // mantém as fotos locais
+      if(typeof _preservarAcab==='function')_preservarAcab(local, merged); // e o acabamento estruturado (tipo de friso)
       if(_sig(merged)===_sig(local)) return;              // nada novo
       _fbAplicando=true;
       try{ localStorage.setItem(KEY, JSON.stringify(merged)); }catch(e){}
