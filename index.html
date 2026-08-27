@@ -5,6 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#000000">
 <title>Recebimento de Serviços — Borrachas Petro</title>
+<!-- ── APP INSTALÁVEL (PWA) ────────────────────────────────────────────────
+     O manifest é o que faz o Chrome mostrar o botão "Instalar" na barra de
+     endereço. Junto com o sw.js, transforma a página em app de janela própria,
+     com ícone na área de trabalho, e permite abrir sem internet.
+     Estes arquivos precisam estar NA MESMA PASTA do index.html no GitHub:
+     manifest.json, sw.js, icon-192.png, icon-512.png, icon-maskable-512.png. -->
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="application-name" content="Recebimento Petro">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Recebimento">
 <style>
   :root{
     --preto:#000000; --amarelo:#FFCC00; --amarelo2:#F0D200;
@@ -299,9 +313,12 @@
         <div class="chip" data-v="Retífica em rolo">Retífica em rolo</div>
         <div class="chip" data-v="Peça técnica em borracha">Peça técnica</div>
         <div class="chip" data-v="Revestimentos diversos">Revest. diversos</div>
+        <div class="chip" data-v="Desenvolvimento">Desenvolvimento</div>
         <div class="chip" data-v="Outros">Outros</div>
       </div>
       <input type="text" id="servicoDesc" class="desc hide" placeholder="Descrever outros…">
+      <!-- A escolha aqui MUDA o formulário das peças (item 7). Ver aplicarModoServico(). -->
+      <div id="servicoDica" class="hint hide" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#FCF3CF;color:#8a6d00;font-weight:600"></div>
 
       <label>Confirmou o serviço com o cliente? <span class="req">*</span></label>
       <div class="seg" id="confcli">
@@ -341,6 +358,30 @@
   </div>
 
   <!-- 9. OBSERVAÇÕES -->
+  <!-- ═══ 10 · ASSINATURA DO CLIENTE — só em Desenvolvimento ══════════════
+       Serve para o cliente confirmar que as informações anotadas são as que ele
+       passou. Não é assinatura digital com validade jurídica formal (ICP-Brasil):
+       é evidência de aceite, com data, hora e quem atendeu. -->
+  <div class="card hide" id="cardAssinatura">
+    <h2><span class="n">10</span> Assinatura do cliente</h2>
+    <div class="hint" style="margin-bottom:8px">O cliente confirma que as informações do item 7 são as que ele passou. Assine com o dedo (celular/tablet) ou com o mouse.</div>
+    <label>Nome de quem está assinando <span class="req">*</span></label>
+    <input type="text" id="assNome" placeholder="Nome completo">
+    <label>Documento (CPF ou RG)</label>
+    <input type="text" id="assDoc" placeholder="Opcional, mas ajuda a identificar">
+    <div class="grp" style="color:#333">Assinatura <span style="color:var(--vermelho)">*</span></div>
+    <div style="border:2px dashed var(--borda);border-radius:10px;background:#fff;overflow:hidden">
+      <canvas id="assCanvas" style="width:100%;height:180px;display:block;touch-action:none;cursor:crosshair"></canvas>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+      <button type="button" onclick="assLimpar()" style="padding:9px 14px;border:1px solid var(--borda);border-radius:9px;background:#fff;font-weight:700;cursor:pointer">Limpar</button>
+      <span id="assStatus" class="hint" style="margin:0"></span>
+    </div>
+    <div class="hint" style="margin-top:10px;padding:9px 11px;border-radius:8px;background:var(--cinza);line-height:1.5">
+      Ao assinar, o cliente declara que <b>leu e concorda</b> com as informações registradas neste recebimento. Ficam gravados a data, a hora e quem atendeu.
+    </div>
+  </div>
+
   <div class="card">
     <h2><span class="n">9</span> Observações gerais</h2>
     <div class="body">
@@ -464,7 +505,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v18';
+const APP_VERSAO='v21';
 const APP_DATA='25/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -476,17 +517,135 @@ let EMAIL_ADM=localStorage.getItem('petro_emailadm')||'producao@borrachaspetro.c
 
 
 // ---- chips single (com campo descrever opcional) ----
-function bindChipsSingle(id, key, descId, descTrigger){
+function bindChipsSingle(id, key, descId, descTrigger, after){
   document.querySelectorAll('#'+id+' .chip').forEach(c=>{
     c.onclick=()=>{
       document.querySelectorAll('#'+id+' .chip').forEach(x=>x.classList.remove('on'));
       c.classList.add('on'); sel[key]=c.dataset.v;
       if(descId){const sh=descTrigger.includes(c.dataset.v);document.getElementById(descId).classList.toggle('hide',!sh);}
+      if(typeof after==='function')after(c.dataset.v);
     };
   });
 }
 bindChipsSingle('transp','transp','transpDesc',['Transportadora','Outros']);
-bindChipsSingle('servico','servico','servicoDesc',['Outros']);
+bindChipsSingle('servico','servico','servicoDesc',['Outros'],function(){ aplicarModoServico(); });
+
+/* ═══ O TIPO DE SERVIÇO (item 6) MANDA NO FORMULÁRIO DAS PEÇAS (item 7) ═══
+   Pedido da Suzana em 25/08/2026, com o motivo de cada um:
+
+   • RETÍFICA EM ROLO — não existe "dureza solicitada": a borracha já está no
+     rolo, só se mede a que tem. Perguntar de novo é campo morto para preencher.
+
+   • PEÇA TÉCNICA — chegam peças de todo tipo, que não batem com os campos de
+     rolo (Ø interno do ferro, comprimento de borracha...). Em vez de obrigar a
+     inventar número, fica um campo de texto livre + produto, quantidade e fotos.
+
+   • DESENVOLVIMENTO — caminho novo. O cliente ainda não sabe o que quer; a
+     equipe vai anotando o que ele passa. Não tem peça definida, então não tem
+     medição: só as informações, as fotos e a assinatura dele no fim.
+
+   Nada é apagado quando um bloco some — os campos continuam no formulário, só
+   escondidos. Se a pessoa trocar o tipo de serviço, o que já tinha digitado
+   volta a aparecer. */
+const _BLOCOS_ESCONDIDOS={
+  normal:          ['info'],
+  retifica:        ['info','dursol'],
+  tecnica:         ['rev','med','dureza','desenho','acab','acess','tipopeca','peso','insp'],
+  desenvolvimento: ['rev','med','espec','dureza','desenho','acab','acess','tipopeca','peso','insp']
+};
+const _DICA_SERVICO={
+  retifica:'Retífica: só a dureza medida. A solicitada não se aplica.',
+  tecnica:'Peça técnica: descreva no campo Informações. Preencha também produto, quantidade e fotos.',
+  desenvolvimento:'Desenvolvimento: anote tudo o que o cliente passar e peça a assinatura dele no item 10.'
+};
+function _modoServico(){
+  var s=sel.servico||'';
+  if(s==='Retífica em rolo')return 'retifica';
+  if(s==='Peça técnica em borracha')return 'tecnica';
+  if(s==='Desenvolvimento')return 'desenvolvimento';
+  return 'normal';
+}
+function aplicarModoServico(){
+  var modo=_modoServico();
+  var esconder=_BLOCOS_ESCONDIDOS[modo]||_BLOCOS_ESCONDIDOS.normal;
+  document.querySelectorAll('.peca').forEach(function(pe){
+    pe.querySelectorAll('[data-blk]').forEach(function(el){
+      el.classList.toggle('hide', esconder.indexOf(el.dataset.blk)>=0);
+    });
+    /* As medições "medido" seguem a regra própria do S/B (classe .revmed).
+       Reaplico aqui porque o bloco pode ter acabado de reaparecer. */
+    var pid=+pe.id.split('-')[1], st=pecasState[pid];
+    if(st&&st.cb)pe.querySelectorAll('.revmed').forEach(function(x){ x.classList.toggle('hide',st.cb==='S/B'); });
+  });
+  var card=document.getElementById('cardAssinatura');
+  if(card)card.classList.toggle('hide', modo!=='desenvolvimento');
+  var dica=document.getElementById('servicoDica');
+  if(dica){ var t=_DICA_SERVICO[modo]||''; dica.textContent=t; dica.classList.toggle('hide',!t); }
+  if(typeof initSecoes==='function'){ try{ initSecoes(); }catch(e){} }
+}
+
+/* ═══ ASSINATURA DO CLIENTE (desenho na tela) ═══════════════════════════ */
+var _assCtx=null,_assDesenhando=false,_assTemTraco=false;
+function _assIniciar(){
+  var cv=document.getElementById('assCanvas'); if(!cv||_assCtx)return;
+  function ajustar(){
+    // resolução real do canvas = tamanho na tela × densidade, senão o traço sai borrado
+    var r=cv.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+    if(!r.width)return;
+    var img=_assTemTraco?cv.toDataURL():null;
+    cv.width=Math.round(r.width*dpr); cv.height=Math.round(r.height*dpr);
+    _assCtx=cv.getContext('2d');
+    _assCtx.scale(dpr,dpr);
+    _assCtx.lineWidth=2.2; _assCtx.lineCap='round'; _assCtx.lineJoin='round'; _assCtx.strokeStyle='#111';
+    if(img){ var im=new Image(); im.onload=function(){ _assCtx.drawImage(im,0,0,r.width,r.height); }; im.src=img; }
+  }
+  ajustar();
+  window.addEventListener('resize',function(){ setTimeout(ajustar,150); });
+  function ponto(ev){
+    var r=cv.getBoundingClientRect();
+    return {x:ev.clientX-r.left, y:ev.clientY-r.top};
+  }
+  cv.addEventListener('pointerdown',function(ev){
+    if(!_assCtx)ajustar(); if(!_assCtx)return;
+    _assDesenhando=true; cv.setPointerCapture(ev.pointerId);
+    var p=ponto(ev); _assCtx.beginPath(); _assCtx.moveTo(p.x,p.y); ev.preventDefault();
+  });
+  cv.addEventListener('pointermove',function(ev){
+    if(!_assDesenhando||!_assCtx)return;
+    var p=ponto(ev); _assCtx.lineTo(p.x,p.y); _assCtx.stroke();
+    _assTemTraco=true; ev.preventDefault();
+  });
+  ['pointerup','pointercancel','pointerleave'].forEach(function(e){
+    cv.addEventListener(e,function(){ _assDesenhando=false; _assAtualizaStatus(); });
+  });
+}
+function _assAtualizaStatus(){
+  var s=document.getElementById('assStatus'); if(!s)return;
+  s.textContent=_assTemTraco?'✓ Assinado':'Ainda não assinado';
+  s.style.color=_assTemTraco?'var(--verde)':'#999';
+}
+function assLimpar(){
+  var cv=document.getElementById('assCanvas');
+  if(cv&&_assCtx)_assCtx.clearRect(0,0,cv.width,cv.height);
+  _assTemTraco=false; _assAtualizaStatus();
+}
+/* PNG da assinatura, ou '' se ninguém assinou. Vai junto com as FOTOS (Firebase),
+   nunca no corpo principal — imagem em base64 estoura o documento do Firestore. */
+function assImagem(){
+  if(!_assTemTraco)return '';
+  var cv=document.getElementById('assCanvas'); if(!cv)return '';
+  try{ return cv.toDataURL('image/png'); }catch(e){ return ''; }
+}
+function assCarregar(dataUrl){
+  var cv=document.getElementById('assCanvas'); if(!cv)return;
+  _assIniciar(); if(!_assCtx)return;
+  assLimpar();
+  if(!dataUrl)return;
+  var r=cv.getBoundingClientRect();
+  var im=new Image();
+  im.onload=function(){ _assCtx.drawImage(im,0,0,r.width,r.height); _assTemTraco=true; _assAtualizaStatus(); };
+  im.src=dataUrl;
+}
 
 // ---- chips multi (embalagem) ----
 document.querySelectorAll('#embTipo .chip').forEach(c=>{
@@ -551,13 +710,27 @@ function addPeca(){
       <span class="resumo"></span><span class="ct">▾</span>
       <button class="rm" onclick="rmPeca(${id})">Remover</button></div>
 
+    <!-- ═══ CAMPO DE INFORMAÇÕES (peça técnica e desenvolvimento) ═══════════
+         Aparece no lugar dos campos técnicos quando o tipo de serviço é
+         "Peça técnica" ou "Desenvolvimento". Motivo: chegam peças de todo tipo,
+         que não batem com os campos de rolo, e obrigar a preencher medição de
+         rolo numa peça que não é rolo só atrapalha quem está no balcão. -->
+    <div data-blk="info" class="hide">
+      <div class="grp" style="color:#333">Informações <span style="color:var(--vermelho)">*</span></div>
+      <textarea class="p_info" rows="6" placeholder="Descreva tudo o que o cliente passou: o que é a peça, medidas, aplicação, material, prazo, o que ele espera…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:9px;border:1px solid var(--borda);font-size:15px;font-family:inherit;resize:vertical"></textarea>
+      <div class="hint" style="margin-top:2px">Escreva com as palavras dele. É este texto que vai para dentro e serve de registro depois.</div>
+    </div>
+
+    <div data-blk="rev">
     <div class="grp">Chegou com ou sem revestimento? <span style="color:var(--vermelho)">*</span></div>
     <div class="seg cbseg" data-pid="${id}">
       <button data-v="C/B">Com revestimento</button>
       <button data-v="S/B">Sem revestimento</button>
     </div>
     <div class="alert cbalert hide" id="cbalert-${id}"><b>Sem revestimento → torno primeiro.</b> Gire no torno e confira se está reto/centrado antes de seguir.</div>
+    </div>
 
+    <div data-blk="med">
     <div class="grp">Medições (mm)</div>
     <div class="row"><div>
       <label>Ø interno (ferro)</label><input type="text" inputmode="decimal" class="p_dint">
@@ -574,19 +747,35 @@ function addPeca(){
     </div><div class="revmed">
       <label>Comp. borracha medido</label><input type="text" inputmode="decimal" class="p_compmed">
     </div></div>
+    </div>
 
+    <div data-blk="espec">
     <div class="grp">Especificação</div>
+    <!-- PRODUTO — 25/08/2026: sai da ADMISSÃO, fica só para COMERCIAL e ORÇAMENTO.
+         Quem identifica a peça na admissão é o "Tipo de peça", logo abaixo; o
+         número do produto é coisa de quem vai lançar no Naphta. Quem manda na
+         visibilidade é modoAdmissao(): o campo aparece no mesmo momento em que
+         os cards da admissão se escondem — ou seja, quando o recebimento já foi
+         enviado e está em comercial/orçamento.
+         O input NUNCA é removido do formulário, de propósito: recebimentos
+         antigos têm produto preenchido, e tirar o campo faria a próxima edição
+         gravar vazio por cima na planilha (a mesma perda do friso, v18). -->
     <div class="row"><div>
-      <label>Produto</label><input type="text" class="p_produto" list="produtosLista" placeholder="cód./nome">
-    </div><div>
       <label>Qtde</label><input type="text" inputmode="numeric" class="p_qtde">
+    </div><div class="produtoBox hide">
+      <label>Produto <span style="font-weight:600;color:#999;font-size:11px">(comercial/orçamento)</span></label>
+      <input type="text" class="p_produto" list="produtosLista" placeholder="cód./nome">
     </div></div>
+    </div>
+    <div data-blk="dureza">
     <div class="row"><div class="revmed">
       <label>Dureza medida e cor</label><input type="text" class="p_durmed" placeholder="ex.: 70 / preta">
-    </div><div>
+    </div><div data-blk="dursol">
       <label>Dureza solicitada</label><input type="text" class="p_dursol" placeholder="Shore A">
     </div></div>
+    </div>
 
+    <div data-blk="desenho">
     <div class="grp" style="color:#333">Tem desenho?</div>
     <div class="seg deseg" data-pid="${id}">
       <button data-v="Não">Não</button>
@@ -595,7 +784,9 @@ function addPeca(){
     <div class="deBox hide" id="deBox-${id}">
       <div class="deFoto"></div>
     </div>
+    </div>
 
+    <div data-blk="acab">
     <div class="grp">Tipo de acabamento?</div>
     <div class="seg acabseg" data-pid="${id}">
       <button data-v="Não">Não</button>
@@ -647,7 +838,9 @@ function addPeca(){
       </div>
       <input type="text" class="p_acaboutros desc hide" placeholder="Qual? Descrever o acabamento…">
     </div>
+    </div><!-- /data-blk=acab -->
 
+    <div data-blk="acess">
     <div class="grp">Acessório?</div>
     <div class="seg acessseg" data-pid="${id}">
       <button data-v="Não">Não</button>
@@ -669,7 +862,9 @@ function addPeca(){
       <input type="text" class="p_acessoutros desc hide" placeholder="Qual acessório? Descrever…">
       <div class="acessQtds"></div>
     </div>
+    </div><!-- /data-blk=acess -->
 
+    <div data-blk="tipopeca">
     <div class="grp">Tipo de peça <span style="color:var(--vermelho)">*</span></div>
     <select class="p_tipo">
       <option value="">Selecione…</option>
@@ -682,12 +877,23 @@ function addPeca(){
       <option>Anel</option>
       <option>Matriz</option>
       <option>Molde</option>
+      <option>Polia com eixo</option>
+      <option>Polia sem eixo</option>
+      <option>Outros</option>
     </select>
+    <!-- "Outros" cobre a peça rara que não cai em nenhuma das opções. O texto é
+         obrigatório: sem ele, meses depois ninguém sabe que peça era. Vai para a
+         planilha na própria coluna "Tipo peça", como "Outros — manopla". -->
+    <input type="text" class="p_tipooutros desc hide" placeholder="Qual peça? Descrever…">
     <div class="hint" style="margin-top:2px">Eixo → pede ponteiras e furo de centro. Outros tipos → só a foto da peça.</div>
+    </div><!-- /data-blk=tipopeca -->
 
+    <div data-blk="peso">
     <label>Peso da peça recebida (kg)</label>
     <input type="text" inputmode="decimal" class="p_peso">
+    </div>
 
+    <div data-blk="insp">
     <div class="grp">Inspeção visual</div>
 
     <div class="eixoInsp hide" id="eixoInsp-${id}">
@@ -722,6 +928,7 @@ function addPeca(){
       <div class="chip echip" data-ev="Atenção">Atenção</div>
       <div class="chip echip" data-ev="Ruim">Ruim</div>
     </div>
+    </div><!-- /data-blk=insp -->
 
     <div class="grp" style="color:#333">Fotos da peça</div>
     <div class="pecaFotos" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px"></div>
@@ -763,6 +970,8 @@ function addPeca(){
   const _tipoSel=div.querySelector('.p_tipo');
   if(_tipoSel){ _tipoSel.onchange=()=>{
     pecasState[id].tipo=_tipoSel.value;
+    const _to=div.querySelector('.p_tipooutros');
+    if(_to)_to.classList.toggle('hide',_tipoSel.value!=='Outros');
     const eixo=(_tipoSel.value==='Eixo');
     const box=document.getElementById('eixoInsp-'+id); if(box)box.classList.toggle('hide',!eixo);
     if(!eixo){
@@ -847,6 +1056,9 @@ function addPeca(){
   // accordion de peças: com mais de uma, recolhe as anteriores e deixa a nova aberta
   var _tds=document.querySelectorAll('.peca');
   if(_tds.length>1){ _tds.forEach(function(pc){ if(pc!==div){ pc.classList.add('collapsed'); var ct=pc.querySelector('.ct'); if(ct)ct.textContent='▸'; _resumoPeca(pc); } }); }
+  // peça nova já nasce no modo do tipo de serviço escolhido no item 6
+  if(typeof aplicarModoServico==='function'){ try{ aplicarModoServico(); }catch(e){} }
+  if(typeof _aplicaProduto==='function'){ try{ _aplicaProduto(); }catch(e){} } // e com o Produto no estado certo
 }
 function togglePeca(ph,e){
   if(e&&e.target&&e.target.closest&&e.target.closest('.rm'))return; // clicar em Remover não recolhe
@@ -862,6 +1074,8 @@ function _resumoPeca(pc){
   var tsel=pc.querySelector('.p_tipo'); var tipo=tsel?tsel.value:'';
   var parts=[]; var prod=g('p_produto'); var qt=g('p_qtde');
   if(tipo)parts.push(tipo); if(prod)parts.push(prod); if(qt)parts.push('Qtde '+qt); if(cb)parts.push(cb);
+  // peça técnica / desenvolvimento não têm tipo nem produto: resume pelo texto
+  if(!parts.length){ var inf=g('p_info'); if(inf)parts.push(inf.length>60?(inf.slice(0,60)+'…'):inf); }
   r.textContent=parts.length?('— '+parts.join(' · ')):'';
 }
 function rmPeca(id){
@@ -1050,9 +1264,13 @@ function coletarPecas(){
     const _dlbl=x=>((x.q==='Outros'&&x.obs)?x.obs:(x.q||'—'));
     const ptResumo = ptSN==='Não conforme' ? ('Não conforme — precisa conserto'+(ptArr.length?(' ('+ptArr.map(_dlbl).join(', ')+')'):'')) : (ptSN||'');
     const fcResumo = fcSN==='Não conforme' ? ('Não conforme — precisa conserto'+(fcArr.length?(' ('+fcArr.map(_dlbl).join(', ')+')'):'')) : (fcSN||'');
+    // "Outros — manopla": mesmo padrão do transporte, embalagem e serviço, para
+    // caber na coluna "Tipo peça" que já existe, sem precisar de coluna nova.
+    var _tp=pecasState[id].tipo||'';
+    if(_tp==='Outros'){ var _tpd=g('p_tipooutros'); if(_tpd)_tp='Outros — '+_tpd; }
     out.push({
       cb:pecasState[id].cb,
-      tipo:pecasState[id].tipo||'',
+      tipo:_tp,
       dint:g('p_dint'),dextsol:g('p_dextsol'),dextmed:g('p_dextmed'),areautil:g('p_areautil'),
       compsol:g('p_compsol'),compmed:g('p_compmed'),produto:g('p_produto'),
       qtde:g('p_qtde'),durmed:g('p_durmed'),dursol:g('p_dursol'),
@@ -1069,6 +1287,7 @@ function coletarPecas(){
       bombe:(acabDados.bombe&&acabDados.bombe.comp)?('comp '+acabDados.bombe.comp+'mm'):'',
       acessSN:acessSN,acess:acess,acessDados:acessItens,acessOutros:acessOutros,
       peso:g('p_peso'),
+      info:g('p_info'),   // texto livre da peça técnica / desenvolvimento
       molde:g('p_molde'),formula:g('p_formula'),pesoOrc:g('p_pesoorc'),preco:g('p_preco'),
       desenhoSN:st.desenhoSN||'',desenhoFoto:st.desenhoFoto||'',fotosPeca:(st.fotosPeca||[]).slice(),
       ponteiraSN:ptSN,ponteiras:ptArr,furoSN:fcSN,furos:fcArr,estado:estado,
@@ -1100,18 +1319,35 @@ function salvarFicha(enviarDepois){
   if(!sel.servico)erros.push('Tipo de serviço');
   else if(sel.servico==='Outros'&&!val('servicoDesc'))erros.push('Descrever o serviço (Outros)');
   if(!sel.confcli)erros.push('Confirmou o serviço com o cliente?');
-  // ---- peças: todos os campos ----
+  // ---- assinatura do cliente: obrigatória em Desenvolvimento ----
+  if(_modoServico()==='desenvolvimento'){
+    if(!val('assNome'))erros.push('Nome de quem está assinando');
+    if(!assImagem())erros.push('Assinatura do cliente (item 10)');
+  }
+  // ---- peças: só se cobra o que o tipo de serviço realmente pede ----
   const pecas=coletarPecas();
+  const _modoSrv=_modoServico();
   document.querySelectorAll('.peca').forEach((pe,idx)=>{
     const n='Peça '+(idx+1)+': ';
     const id=+pe.id.split('-')[1]; const st=pecasState[id]||{};
     const gt=cls=>{const el=pe.querySelector('.'+cls);return el?el.value.trim():'';};
     const faltou=cls=>{const el=pe.querySelector('.'+cls);if(el)el.classList.toggle('field-err',!el.value.trim());return el&&!el.value.trim();};
+
+    /* PEÇA TÉCNICA e DESENVOLVIMENTO: o formulário de rolo não se aplica, então
+       a validação também não. Cobra só o que está visível na tela — cobrar campo
+       escondido é o jeito mais rápido de travar alguém sem ele entender por quê. */
+    if(_modoSrv==='tecnica'||_modoSrv==='desenvolvimento'){
+      if(faltou('p_info'))erros.push(n+'Informações (descreva o que o cliente passou)');
+      if(!editId && !(st.fotosPeca&&st.fotosPeca.length))erros.push(n+'Foto (obrigatória)');
+      return;
+    }
+
     if(!st.cb)erros.push(n+'com/sem revestimento');
-    // campos de TEXTO obrigatórios (números são opcionais — podem ficar em branco ou NA)
-    if(faltou('p_produto'))erros.push(n+'Produto (escreva NA se não tiver)');
+    // Produto saiu do formulário em 25/08/2026 — quem identifica a peça é o
+    // "Tipo de peça". Por isso deixou de ser cobrado aqui.
     if(st.cb!=='S/B'&&faltou('p_durmed'))erros.push(n+'Dureza medida/cor (escreva NA se não tiver)');
-    if(faltou('p_dursol'))erros.push(n+'Dureza solicitada (escreva NA se não tiver)');
+    // RETÍFICA não tem dureza solicitada: a borracha já está no rolo, só se mede
+    if(_modoSrv!=='retifica'&&faltou('p_dursol'))erros.push(n+'Dureza solicitada (escreva NA se não tiver)');
     if(!st.desenhoSN)erros.push(n+'Tem desenho?');
     if(!st.acab)erros.push(n+'Tipo de acabamento?');
     else if(st.acab==='Sim'){
@@ -1126,6 +1362,7 @@ function salvarFicha(enviarDepois){
       if(!st.acessSet||st.acessSet.size===0)erros.push(n+'escolher o acessório');
     }
     if(!st.tipo)erros.push(n+'Tipo de peça');
+    else if(st.tipo==='Outros'&&faltou('p_tipooutros'))erros.push(n+'Tipo de peça: descrever qual');
     if(st.tipo==='Eixo'){
       if(!st.ptSN)erros.push(n+'Ponteira (Conforme/Não conforme)');
       else{
@@ -1147,8 +1384,10 @@ function salvarFicha(enviarDepois){
   }
   eb.classList.remove('show');
   const d=coletar(pecas);
+  // o que mudou é calculado ANTES de salvar, comparando com a versão anterior
+  var _mudou=''; if(editId){ try{ _mudou=_diffFicha(_regAnterior(editId),d); }catch(e){} }
   salvarLocal(d);
-  enviarPlanilha(d,!!editId);
+  enviarPlanilha(d,!!editId,_mudou);
   if(typeof _fotosEnviarNuvem==='function')_fotosEnviarNuvem(d); // sobe as fotos pra nuvem (chegam nas outras áreas)
   editId=null;
   limparForm(false);
@@ -1260,6 +1499,50 @@ function confirmarEnviar(){
   if(anexar){ _ensureJsPDF(function(){ if(typeof _comFotosDaNuvem==='function')_comFotosDaNuvem(Object.assign({},d,{pecas:(d.pecas||[]).map(function(p){return Object.assign({},p);})}),mandar); else mandar(d); }); }
   else { mandar(d); }
 }
+/* ═══ O QUE MUDOU NESTA EDIÇÃO ═══════════════════════════════════════════
+   Compara a ficha como estava com a ficha como ficou e devolve um texto curto
+   e legível — é ele que vai para a coluna "O que mudou" da aba "Log de
+   alterações" da planilha. Sem isso o registro só diria "fulano editou", que
+   para auditoria não vale quase nada: o que importa é o que ele trocou.
+   Campos de foto e de controle interno ficam de fora de propósito. */
+function _regAnterior(id){
+  if(!id)return {};
+  try{ return (JSON.parse(localStorage.getItem('petro_receb')||'[]').find(a=>String(a.id)===String(id)))
+            ||((LISTA_ATUAL||[]).find(a=>String(a.id)===String(id)))||{}; }catch(e){ return {}; }
+}
+const _ROTULOS={resp:'Responsável',data:'Data',cliente:'Cliente',contato:'Contato',fone:'Fone',
+  transp:'Transporte',nf:'NF',nfdiv:'Divergências NF',embTipo:'Embalagem',embCond:'Condições emb.',
+  embConserto:'Orçar conserto',embNovaCaixa:'Orçar nova caixa',servico:'Serviço',
+  confcli:'Confirmado c/ cliente',obs:'Observações'};
+const _ROTULOS_PECA={cb:'C/B ou S/B',tipo:'Tipo de peça',produto:'Produto',qtde:'Qtde',
+  dint:'Ø int ferro',dextsol:'Ø ext sol',dextmed:'Ø ext med',areautil:'Comp área útil',
+  compsol:'Comp borr sol',compmed:'Comp borr med',durmed:'Dureza med/cor',dursol:'Dureza sol',
+  peso:'Peso',acabamento:'Acabamento',acess:'Acessórios',estado:'Estado geral',
+  molde:'Molde',formula:'Fórmula',pesoOrc:'Peso orçamento',preco:'Preço'};
+function _diffFicha(antes,depois){
+  if(!antes||!depois)return '';
+  var out=[];
+  var txt=function(v){ return (v===null||v===undefined)?'':String(v).trim(); };
+  var cmp=function(rotulo,a,b){
+    a=txt(a); b=txt(b);
+    if(a===b)return;
+    out.push(rotulo+': "'+(a||'(vazio)')+'" → "'+(b||'(vazio)')+'"');
+  };
+  Object.keys(_ROTULOS).forEach(function(k){ cmp(_ROTULOS[k],antes[k],depois[k]); });
+  var pa=antes.pecas||[], pd=depois.pecas||[];
+  var n=Math.max(pa.length,pd.length);
+  for(var i=0;i<n;i++){
+    var a=pa[i], b=pd[i], rot='Peça '+(i+1)+' ';
+    if(!a&&b){ out.push(rot+'ADICIONADA'+(b.tipo?(' ('+b.tipo+')'):(b.produto?(' ('+b.produto+')'):''))); continue; }
+    if(a&&!b){ out.push(rot+'REMOVIDA'+(a.tipo?(' ('+a.tipo+')'):(a.produto?(' ('+a.produto+')'):''))); continue; }
+    Object.keys(_ROTULOS_PECA).forEach(function(k){ cmp(rot+_ROTULOS_PECA[k],a[k],b[k]); });
+    cmp(rot+'Ponteira',(a.visual||{}).ponteira,(b.visual||{}).ponteira);
+    cmp(rot+'Furo de centro',(a.visual||{}).furo,(b.visual||{}).furo);
+  }
+  if(!out.length)return 'nenhum campo alterado';
+  var s=out.join(' | ');
+  return s.length>1500 ? (s.slice(0,1500)+'… (+'+(out.length)+' alterações)') : s;
+}
 function coletar(pecas){
   var prev={}; if(editId){try{prev=(JSON.parse(localStorage.getItem('petro_receb')||'[]').find(a=>String(a.id)===String(editId)))||((LISTA_ATUAL||[]).find(a=>String(a.id)===String(editId)))||{};}catch(e){}}
   return {
@@ -1285,6 +1568,15 @@ function coletar(pecas){
     embTipo:[...embTipoSel].map(t=>t==='Outros'?('Outros — '+val('embTipoDesc')):t).join(', '),
     embCond:sel.embCond,embConserto:sel.embConserto,embNovaCaixa:sel.embNovaCaixa,
     servico:sel.servico+(sel.servico==='Outros'?(' — '+val('servicoDesc')):''),confcli:sel.confcli,
+    /* ASSINATURA DO CLIENTE (Desenvolvimento)
+       A imagem viaja junto com as FOTOS (documento próprio no Firebase), nunca
+       no corpo principal nem na planilha — base64 estoura o documento do
+       Firestore e não cabe numa célula. Na planilha vão só nome, documento e
+       data/hora, que é o que uma auditoria precisa ler. */
+    assinatura:(typeof assImagem==='function'?assImagem():''),
+    assinanteNome:val('assNome'), assinanteDoc:val('assDoc'),
+    assinadoEm:((typeof assImagem==='function'&&assImagem())
+      ? (prev.assinadoEm||new Date().toLocaleString('pt-BR')) : ''),
     pecas:pecas,fotos:[...fotos],obs:val('obs'),criado:new Date().toLocaleString('pt-BR')
   };
 }
@@ -1609,9 +1901,58 @@ function gerarPDFdoc(d){
     _galeria('DESENHOS',desenhos);
     _galeria('OUTRAS FOTOS',gerais);
   }
+  /* INFORMAÇÕES em texto livre (peça técnica / desenvolvimento).
+     Fica FORA da tabela de peças de propósito: é texto corrido e longo, que
+     numa coluna estreita sairia picotado e ilegível. */
+  function blocoInformacoes(){
+    var comInfo=(d.pecas||[]).map(function(p,i){return {i:i+1,t:(p&&p.info||'').trim()};})
+                             .filter(function(x){return !!x.t;});
+    if(!comInfo.length)return;
+    ensure(14);
+    doc.setFillColor(105,105,105);doc.rect(M,y,CW,6,'F');
+    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(8.5);
+    doc.text('INFORMAÇÕES REGISTRADAS',M+2,y+4.1); y+=8;
+    comInfo.forEach(function(x){
+      doc.setFont('helvetica','bold');doc.setFontSize(8);doc.setTextColor(30,30,30);
+      ensure(6); doc.text('Peça '+x.i,M,y); y+=4;
+      doc.setFont('helvetica','normal');
+      var ls=doc.splitTextToSize(x.t,CW);
+      for(var k=0;k<ls.length;k++){ ensure(5); doc.text(ls[k],M,y); y+=4; }
+      y+=2;
+    });
+  }
+  /* ACEITE DO CLIENTE (Desenvolvimento). É o ponto do documento: prova de que o
+     cliente viu e concordou com o que foi anotado. */
+  function blocoAssinatura(){
+    if(!d.assinatura&&!d.assinanteNome)return;
+    ensure(46);
+    doc.setFillColor(105,105,105);doc.rect(M,y,CW,6,'F');
+    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(8.5);
+    doc.text('ACEITE DO CLIENTE',M+2,y+4.1); y+=8;
+    doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(30,30,30);
+    var termo=doc.splitTextToSize('O cliente declara que leu e concorda com as informações registradas neste recebimento.',CW);
+    doc.text(termo,M,y); y+=termo.length*4+2;
+    if(d.assinatura){
+      try{
+        var aw=Math.min(90,CW), ah=aw*0.33;
+        doc.addImage(d.assinatura,'PNG',M,y,aw,ah);
+        doc.setDrawColor(120,120,120); doc.line(M,y+ah+1,M+aw,y+ah+1);
+        y+=ah+4;
+      }catch(e){ y+=2; }
+    }
+    doc.setFont('helvetica','bold');
+    if(d.assinanteNome){ doc.text('Assinado por: '+d.assinanteNome,M,y); y+=4.2; }
+    doc.setFont('helvetica','normal');
+    if(d.assinanteDoc){ doc.text('Documento: '+d.assinanteDoc,M,y); y+=4.2; }
+    if(d.assinadoEm){ doc.text('Data e hora: '+d.assinadoEm,M,y); y+=4.2; }
+    if(d.resp){ doc.text('Atendido por: '+d.resp,M,y); y+=4.2; }
+    y+=2;
+  }
   header();
   infoBlocos();
   tabelaPecas();
+  blocoInformacoes();
+  blocoAssinatura();
   if(d.obs){ ensure(12); doc.setFillColor(105,105,105);doc.rect(M,y,CW,6,'F');
     doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.text('OBSERVAÇÕES GERAIS',M+2,y+4.1);y+=8;
     doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(30,30,30);
@@ -1690,7 +2031,10 @@ function orcamentoPronto(id){
 function _resumoOrc(d){
   var t='Cliente: '+(d.cliente||'')+' · NF '+(d.nf||'—')+'\n';
   (d.pecas||[]).forEach(function(p,i){
-    t+='Peça '+(i+1)+': '+(p.produto||'—')+' — Molde: '+(p.molde||'—')+' | Fórmula: '+(p.formula||'—')+' | Peso: '+(p.pesoOrc||p.peso||'—')+' | Preço: '+(p.preco||'—')+'\n';
+    // identifica pelo TIPO (o Produto saiu do formulário em 25/08/2026);
+    // registros antigos ainda caem no produto, que é o que eles têm
+    var _idp=(p.tipo||p.produto||'—');
+    t+='Peça '+(i+1)+': '+_idp+' — Molde: '+(p.molde||'—')+' | Fórmula: '+(p.formula||'—')+' | Peso: '+(p.pesoOrc||p.peso||'—')+' | Preço: '+(p.preco||'—')+'\n';
   });
   return t;
 }
@@ -2199,7 +2543,14 @@ function carregarParaEditar(id){
     set('p_compsol',p.compsol);set('p_compmed',p.compmed);set('p_produto',p.produto);
     set('p_qtde',p.qtde);set('p_durmed',p.durmed);set('p_dursol',p.dursol);set('p_peso',p.peso);
     set('p_molde',p.molde);set('p_formula',p.formula);set('p_pesoorc',p.pesoOrc);set('p_preco',p.preco);
-    if(p.tipo){const _ts=pe.querySelector('.p_tipo');if(_ts){_ts.value=p.tipo;_ts.dispatchEvent(new Event('change'));}}
+    set('p_info',p.info);   // texto livre da peça técnica / desenvolvimento
+    // tipo pode vir como "Outros — manopla": a opção é a parte antes do travessão
+    if(p.tipo){
+      const _tb=String(p.tipo).split(' — ')[0];
+      const _ts=pe.querySelector('.p_tipo');
+      if(_ts){ _ts.value=_tb; _ts.dispatchEvent(new Event('change')); }
+      set('p_tipooutros',descPart(p.tipo));
+    }
     if(p.cb){const b=[].slice.call(pe.querySelectorAll('.cbseg button')).find(x=>x.dataset.v===p.cb);if(b)b.click();}
     // ---- acabamento ----
     /* A planilha guarda só o RESULTADO (texto do acabamento, lista de acessórios),
@@ -2276,6 +2627,10 @@ function carregarParaEditar(id){
     if(d.etapa==='orcamento'||_temOrc){ var ob=pe.querySelector('.orcBlock'); if(ob)ob.classList.remove('hide'); }
   });
   fotos=(d.fotos&&Array.isArray(d.fotos))?d.fotos.slice():[];renderFotos();
+  // assinatura do cliente (Desenvolvimento) — imagem pode chegar depois, pela nuvem
+  setV('assNome',d.assinanteNome); setV('assDoc',d.assinanteDoc);
+  if(typeof assCarregar==='function')assCarregar(d.assinatura||'');
+  if(typeof aplicarModoServico==='function')aplicarModoServico(); // aplica o modo do item 6 nas peças recém-montadas
   initSecoes(); modoAdmissao(d.etapa,d.jaEnviado);
   // busca as fotos na nuvem e mostra dentro do formulário (caso este aparelho ainda não tenha)
   if(typeof _comFotosDaNuvem==='function'){ _comFotosDaNuvem(Object.assign({},d,{pecas:(d.pecas||[]).map(function(p){return Object.assign({},p);})}), _reaplicarFotosForm); }
@@ -2362,8 +2717,16 @@ function _idxPecas(){
   if(i>=0)return i;
   return Math.max(0,Math.min(_cardsAdmissao().length,all.length-1));
 }
+/* Vale para o formulário inteiro: guardado aqui porque uma peça adicionada
+   DEPOIS (botão "+ Adicionar peça") também precisa nascer no estado certo. */
+var _MOSTRA_PRODUTO=false;
+function _aplicaProduto(){
+  document.querySelectorAll('.produtoBox').forEach(function(x){ x.classList.toggle('hide',!_MOSTRA_PRODUTO); });
+}
 function modoAdmissao(etapa,enviado){
   var oculta=!!enviado&&(etapa==='comercial'||etapa==='orcamento');
+  // mesma condição: onde a admissão some, o Produto aparece
+  _MOSTRA_PRODUTO=oculta; _aplicaProduto();
   var tg=document.getElementById('admToggle'); if(tg)tg.classList.toggle('hide',!oculta);
   _admAberto=!oculta; _aplicaAdm();
   if(!oculta)return;
@@ -2384,7 +2747,8 @@ function initSecoes(){
 function limparForm(ask){
   if(ask&&!confirm('Limpar o formulário?'))return;
   editId=null;fotos=[];embTipoSel.clear();
-  ['resp','cliente','contato','fone','transpDesc','nf','embTipoDesc','servicoDesc','obs','nfQtdeNota','nfQtdeReceb'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['resp','cliente','contato','fone','transpDesc','nf','embTipoDesc','servicoDesc','obs','nfQtdeNota','nfQtdeReceb','assNome','assDoc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  if(typeof assLimpar==='function'){ try{ assLimpar(); }catch(e){} }
   var _nsn=document.getElementById('nfSemNota');if(_nsn)_nsn.checked=false;
   var _nf=document.getElementById('nf');if(_nf)_nf.disabled=false;
   var _ndw=document.getElementById('nfDivWrap');if(_ndw)_ndw.classList.remove('hide');
@@ -2527,16 +2891,24 @@ function filaEnviar(manual){
   passo(0);
 }
 function postSheet(url,obj){
+  /* CARIMBO DE AUTORIA — 25/08/2026
+     Aqui, e não no _comChave, de propósito: se a ação for parar na fila offline,
+     ela precisa levar o e-mail de QUEM CLICOU, não o de quem estiver logado
+     quando a fila subir amanhã. Carimbando antes do envio, a cópia guardada na
+     fila já sai com o dono certo. */
+  try{ if(obj&&!obj.quem&&typeof window._usuarioAtual==='function')obj.quem=window._usuarioAtual(); }catch(e){}
   return fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(_comChave(obj))})
     .catch(function(){
       if(_filaAdd(obj))toast('Sem internet — guardado pra enviar depois');
       else if(obj&&obj.action==='email')toast('Sem internet — o e-mail não saiu. Tente de novo quando conectar.');
     });
 }
-function enviarPlanilha(d,editando){
+function enviarPlanilha(d,editando,mudou){
   if(!SHEET_URL)return;
-  var c={};for(var k in d){if(k!=='fotos')c[k]=d[k];}
+  // 'assinatura' é imagem base64: não cabe numa célula e estouraria o POST
+  var c={};for(var k in d){if(k!=='fotos'&&k!=='assinatura')c[k]=d[k];}
   c.qtdFotos=(d.fotos&&d.fotos.length)||0;
+  if(mudou)c.mudou=mudou;   // texto do que mudou, para a aba "Log de alterações"
   // 'editar' apaga as linhas antigas do ID e regrava. Sem isto, cada edição
   // acrescentava linhas novas com o mesmo ID e as peças apareciam duplicadas.
   c.action=editando?'editar':'novo';
@@ -2566,6 +2938,29 @@ if(SHEET_URL)setTimeout(function(){filaEnviar(false);},2500); // sobe o que fico
    renderSaved() estourava e a execução morria antes do addPeca(). */
 try{ renderSaved(); }catch(e){ console.error('[Petro] init renderSaved:',e); }
 try{ addPeca(); }catch(e){ console.error('[Petro] init addPeca:',e); }
+try{ _assIniciar(); _assAtualizaStatus(); }catch(e){ console.warn('[Petro] assinatura:',e); }
+try{ aplicarModoServico(); }catch(e){ console.warn('[Petro] modo do serviço:',e); }
+/* ── REGISTRO DO SERVICE WORKER (app instalável + abrir sem internet) ──
+   Só roda em https (GitHub Pages) ou localhost. Abrir o arquivo direto do
+   computador (file://) não instala — e não é erro, é regra do navegador.
+   Envolvido em try/catch: se falhar, o app funciona igual, só não instala. */
+try{
+  if('serviceWorker' in navigator){
+    window.addEventListener('load',function(){
+      navigator.serviceWorker.register('sw.js').then(function(reg){
+        reg.addEventListener('updatefound',function(){
+          var nova=reg.installing; if(!nova)return;
+          nova.addEventListener('statechange',function(){
+            // controller existente = já havia uma versão instalada: isto é ATUALIZAÇÃO
+            if(nova.state==='installed'&&navigator.serviceWorker.controller){
+              if(typeof toast==='function')toast('Versão nova do app — feche e abra de novo');
+            }
+          });
+        });
+      }).catch(function(e){ console.warn('[Petro] service worker não registrou:',e); });
+    });
+  }
+}catch(e){ console.warn('[Petro] PWA:',e); }
 try{ atualizarClientes(); }catch(e){ console.error('[Petro] init atualizarClientes:',e); }
 // rede de segurança: se por qualquer motivo o item 7 ficou sem peça, cria uma
 try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){}
@@ -2653,7 +3048,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
 
   function _semFotos(receb){
     return (receb||[]).map(function(r){
-      var c=Object.assign({}, r); c.fotos=[];
+      var c=Object.assign({}, r); c.fotos=[]; c.assinatura=''; // imagem vai no doc de fotos
       if(c.pecas) c.pecas=c.pecas.map(function(p){
         var pp=Object.assign({}, p);
         if('desenhoFoto' in pp) pp.desenhoFoto='';
@@ -2668,6 +3063,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
     var m={}; (local||[]).forEach(function(r){ if(r&&r.id!=null) m[r.id]=r; });
     (merged||[]).forEach(function(r){
       if(!r||r.id==null) return; var lr=m[r.id]; if(!lr) return;
+      if(!r.assinatura && lr.assinatura) r.assinatura=lr.assinatura;
       if((!r.fotos||!r.fotos.length) && lr.fotos && lr.fotos.length) r.fotos=lr.fotos;
       if(r.pecas && lr.pecas) r.pecas.forEach(function(p,i){
         var lp=lr.pecas[i]; if(!lp) return;
@@ -2762,6 +3158,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
   function _col(){ return firebase.firestore().collection('petro_fotos'); }
   function _temFotos(d){
     if(!d) return false;
+    if(d.assinatura) return true;          // a assinatura viaja junto com as fotos
     if((d.fotos||[]).length) return true;
     return (d.pecas||[]).some(function(p){
       return (p&&p.desenhoFoto) ||
@@ -2772,6 +3169,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
   }
   function _extrair(d){
     return {
+      assinatura:d.assinatura||'',
       fotos:(d.fotos||[]).slice(),
       pecas:(d.pecas||[]).map(function(p){
         return {
@@ -2785,6 +3183,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
   }
   function _aplicar(d,b){
     if(!b) return d;
+    if(!d.assinatura&&b.assinatura) d.assinatura=b.assinatura;
     if((!d.fotos||!d.fotos.length)&&b.fotos&&b.fotos.length) d.fotos=b.fotos.slice();
     (d.pecas||[]).forEach(function(p,i){
       var pb=b.pecas&&b.pecas[i]; if(!pb||!p) return;
@@ -2798,7 +3197,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
   function _u(a,b){ a=a||[]; b=b||[]; var seen={},out=[]; a.concat(b).forEach(function(s){ if(s&&!seen[s]){seen[s]=1;out.push(s);} }); return out; }
   function _mergeFotos(base,novo){
     base=base||{fotos:[],pecas:[]}; novo=novo||{fotos:[],pecas:[]};
-    var out={fotos:_u(base.fotos,novo.fotos),pecas:[]};
+    var out={assinatura:novo.assinatura||base.assinatura||'',fotos:_u(base.fotos,novo.fotos),pecas:[]};
     var n=Math.max((base.pecas||[]).length,(novo.pecas||[]).length);
     for(var i=0;i<n;i++){
       var pb=(base.pecas||[])[i]||{}, pn=(novo.pecas||[])[i]||{};
@@ -2867,54 +3266,136 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
 })();
 </script>
 
-<!-- ════════ LOGIN DA EQUIPE (senha única) ════════
-     Protege o acesso à nuvem: as regras do Firebase passam a exigir login.
-     O app lembra a sessão no aparelho (entra 1 vez). Sem Firebase (offline/SDK
-     não carregou) NÃO trava — segue em modo local pelo próprio aparelho. -->
+<!-- ════════ LOGIN INDIVIDUAL (uma senha por pessoa) ════════
+     ANTES (até 25/08/2026): uma senha só, da equipe inteira, e a sessão nunca
+     expirava. Isso protegia a nuvem, mas não dizia NADA sobre quem fez o quê —
+     e em computador compartilhado o registro apontaria sempre a mesma pessoa.
+
+     AGORA: cada um tem e-mail e senha próprios, e a sessão vale só até a virada
+     do dia. É isso que faz o "Log de alterações" da planilha ter valor: o e-mail
+     de quem está logado é carimbado em toda ação que sai deste aparelho.
+
+     OFFLINE: se o Firebase não carregar (sem internet), o app NÃO trava — mas só
+     libera se este aparelho JÁ tiver um login válido guardado. Aparelho onde
+     ninguém nunca entrou continua bloqueado, mesmo offline.
+
+     ⚠️ LIMITE CONHECIDO: isto protege o FIREBASE. A planilha (Apps Script) ainda
+     aceita qualquer chamada que traga a CHAVE, que está no código público. Ver
+     "[C] Revisão de Segurança - App Recebimento.md". -->
 <script>
 (function(){
+  // ►►► LIGA/DESLIGA do login ◄◄◄
+  // Só troque para true DEPOIS de criar as contas no Firebase e publicar as
+  // regras novas (ver "[C] PASSO A PASSO - Login individual e log.md").
+  var LOGIN_INDIVIDUAL = false;
+
+  var SESSAO_KEY='petro_sessao';   // {email, dia} — controla a expiração diária
+
+  function _hoje(){ var d=new Date(); return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate(); }
+  function _sessaoLer(){ try{ return JSON.parse(localStorage.getItem(SESSAO_KEY)||'null'); }catch(e){ return null; } }
+  function _sessaoGravar(em){ try{ localStorage.setItem(SESSAO_KEY,JSON.stringify({email:em,dia:_hoje()})); }catch(e){} }
+  function _sessaoLimpar(){ try{ localStorage.removeItem(SESSAO_KEY); }catch(e){} }
+  function _sessaoValida(){ var s=_sessaoLer(); return !!(s&&s.email&&s.dia===_hoje()); }
+
+  /* Nome de exibição a partir do e-mail: "maria.silva@..." → "Maria Silva".
+     O registro oficial é sempre o E-MAIL; o nome é só para a tela e para
+     pré-preencher o campo "Responsável". */
+  function _nomeDoEmail(em){
+    var loc=String(em||'').split('@')[0].replace(/[._-]+/g,' ').trim();
+    return loc.replace(/\b\w/g,function(c){return c.toUpperCase();});
+  }
+
+  /* Quem está usando o app AGORA. É esta função que o resto do app chama para
+     carimbar as ações. Se o login estiver desligado, devolve vazio e o
+     comportamento antigo continua valendo. */
+  window._usuarioAtual=function(){ var s=_sessaoLer(); return (s&&s.email)?s.email:''; };
+  window._usuarioNome=function(){ return _nomeDoEmail(window._usuarioAtual()); };
+
+  if(!LOGIN_INDIVIDUAL) return;   // login desligado → app abre normal, sem carimbo
+
   var gate=document.createElement('div');
   gate.id='loginGate';
   gate.style.cssText='position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;background:#111;padding:20px';
   gate.innerHTML=''+
     '<div style="width:100%;max-width:340px;background:#1b1b1b;border:1px solid #333;border-radius:16px;padding:24px 20px;text-align:center;font-family:inherit">'+
       '<div style="font-size:15px;font-weight:800;color:#FFCC00;letter-spacing:.5px">BORRACHAS PETRO</div>'+
-      '<div style="font-size:13px;color:#ccc;margin:2px 0 18px">Recebimento de Serviços — acesso da equipe</div>'+
-      '<input id="lgEmail" type="email" autocomplete="username" value="recebimento@borrachaspetro.com.br" placeholder="E-mail da equipe" style="width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:9px;border-radius:9px;border:1px solid #444;background:#111;color:#fff;font-size:15px">'+
-      '<input id="lgPass" type="password" autocomplete="current-password" placeholder="Senha" style="width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:12px;border-radius:9px;border:1px solid #444;background:#111;color:#fff;font-size:15px">'+
+      '<div style="font-size:13px;color:#ccc;margin:2px 0 18px">Recebimento de Serviços</div>'+
+      '<input id="lgEmail" type="email" autocomplete="username" placeholder="Seu e-mail" style="width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:9px;border-radius:9px;border:1px solid #444;background:#111;color:#fff;font-size:15px">'+
+      '<input id="lgPass" type="password" autocomplete="current-password" placeholder="Sua senha" style="width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:12px;border-radius:9px;border:1px solid #444;background:#111;color:#fff;font-size:15px">'+
       '<button id="lgBtn" style="width:100%;padding:12px;border:0;border-radius:9px;background:#FFCC00;color:#111;font-weight:800;font-size:15px;cursor:pointer">Entrar</button>'+
       '<div id="lgErr" style="color:#ff6b6b;font-size:13px;margin-top:10px;min-height:16px"></div>'+
-      '<div style="color:#777;font-size:11px;margin-top:6px">Acesso restrito. Você entra uma vez por aparelho.</div>'+
+      '<div style="color:#777;font-size:11px;margin-top:6px;line-height:1.5">Cada pessoa entra com a própria senha.<br>A sessão vale até o fim do dia.</div>'+
     '</div>';
   document.body.appendChild(gate);
 
-  // ►►► LIGA/DESLIGA do login da equipe ◄◄◄
-  // Deixe FALSE até criar a conta da equipe no Firebase (guia, Passo 7).
-  // Troque para true SÓ depois de: criar a conta + publicar as regras novas.
-  var LOGIN_EQUIPE = false;
-  if(!LOGIN_EQUIPE){ gate.style.display='none'; return; } // login desligado → app abre normal
+  var elEmail=document.getElementById('lgEmail');
+  var ultimo=_sessaoLer(); if(ultimo&&ultimo.email)elEmail.value=ultimo.email; // facilita: lembra o e-mail, nunca a senha
 
   var auth=null;
   try{ if(typeof firebase!=='undefined' && firebase.apps && firebase.apps.length && firebase.auth){ auth=firebase.auth(); } }catch(e){}
-  if(!auth){ gate.style.display='none'; return; } // sem Firebase → modo local, não trava o app
+
+  function _liberar(){ gate.style.display='none'; }
+  function _bloquear(msg){
+    gate.style.display='flex';
+    if(msg){ var e=document.getElementById('lgErr'); if(e)e.textContent=msg; }
+  }
+
+  /* SEM FIREBASE (offline ou SDK não carregou).
+     Não dá para validar senha — então vale o que este aparelho já sabe:
+     sessão do dia válida = passa; qualquer outra coisa = bloqueia. */
+  if(!auth){
+    if(_sessaoValida())_liberar();
+    else _bloquear('Sem internet. Conecte-se para entrar pelo menos uma vez hoje.');
+    return;
+  }
+
   try{ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); }catch(e){}
 
   function entrar(){
-    var em=(document.getElementById('lgEmail').value||'').trim();
+    var em=(elEmail.value||'').trim().toLowerCase();
     var pw=document.getElementById('lgPass').value||'';
     var err=document.getElementById('lgErr'); err.textContent='';
     if(!em||!pw){ err.textContent='Preencha e-mail e senha.'; return; }
     var btn=document.getElementById('lgBtn'); btn.disabled=true; btn.textContent='Entrando…';
     auth.signInWithEmailAndPassword(em,pw)
-      .then(function(){ location.reload(); })
-      .catch(function(e){ btn.disabled=false; btn.textContent='Entrar';
-        err.textContent=(e&&e.code==='auth/too-many-requests')?'Muitas tentativas. Aguarde um pouco.':'E-mail ou senha inválidos.'; });
+      .then(function(cred){
+        _sessaoGravar((cred&&cred.user&&cred.user.email)||em);
+        location.reload();
+      })
+      .catch(function(e){
+        btn.disabled=false; btn.textContent='Entrar';
+        var c=e&&e.code;
+        err.textContent = (c==='auth/too-many-requests') ? 'Muitas tentativas. Aguarde um pouco.'
+                        : (c==='auth/network-request-failed') ? 'Sem conexão com a internet.'
+                        : 'E-mail ou senha inválidos.';
+      });
   }
   document.getElementById('lgBtn').onclick=entrar;
   document.getElementById('lgPass').addEventListener('keydown',function(e){ if(e.key==='Enter')entrar(); });
 
-  window._appLogout=function(){ try{ auth.signOut().then(function(){location.reload();}); }catch(e){ location.reload(); } };
-  auth.onAuthStateChanged(function(u){ gate.style.display = u ? 'none' : 'flex'; });
+  window._appLogout=function(){
+    _sessaoLimpar();
+    try{ auth.signOut().then(function(){location.reload();}); }catch(e){ location.reload(); }
+  };
+
+  auth.onAuthStateChanged(function(u){
+    if(!u){ _sessaoLimpar(); _bloquear(); return; }
+    if(!_sessaoValida()){
+      /* Logado no Firebase, mas a sessão deste aparelho é de ONTEM. É aqui que
+         a expiração diária acontece: desloga e pede a senha de novo, para o
+         registro não continuar atribuindo tudo a quem entrou no dia anterior. */
+      auth.signOut().then(function(){ _sessaoLimpar(); _bloquear('Sessão do dia anterior. Entre de novo.'); })
+                    .catch(function(){ _sessaoLimpar(); _bloquear(); });
+      return;
+    }
+    _sessaoGravar(u.email||_usuarioAtual());
+    _liberar();
+    // o "Responsável" já vem preenchido com quem está logado
+    try{
+      var r=document.getElementById('resp');
+      if(r&&!r.value)r.value=_nomeDoEmail(u.email);
+    }catch(e){}
+  });
 })();
 </script>
 </body>
