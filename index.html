@@ -571,7 +571,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v38';
+const APP_VERSAO='v39';
 const APP_DATA='25/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -2104,7 +2104,13 @@ function gerarRelatorio(d){
       const img=new Image();
       img.onload=()=>{const col=drawn%fcols,rw=(drawn/fcols)|0;
         const px=P+col*(fw+16),py=yy+rw*(fh+12);
-        x.drawImage(img,px,py,fw,fh);x.strokeStyle='#ccc';x.strokeRect(px,py,fw,fh);drawn++;next();};
+        /* Mesma correção do PDF: encaixa a foto no quadro respeitando a
+           proporção, em vez de esticar. Vale para o relatório em imagem que
+           vai anexado no e-mail da admissão. */
+        var _e=Math.min(fw/img.width,fh/img.height),
+            _lw=img.width*_e,_lh=img.height*_e;
+        x.drawImage(img,px+(fw-_lw)/2,py+(fh-_lh)/2,_lw,_lh);
+        x.strokeStyle='#ccc';x.strokeRect(px,py,fw,fh);drawn++;next();};
       img.src=d.fotos[drawn];
     })();
   }
@@ -2290,11 +2296,33 @@ function gerarPDFdoc(d,semFotos){
     doc.setFillColor(105,105,105);doc.rect(M,y,CW,6,'F');
     doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(8.5);
     doc.text(titulo,M+2,y+4.1); y+=8;
-    var cols=5,gap=4,fw=(CW-(cols-1)*gap)/cols,fh=fw*0.72,col=0;
+    /* ═══ FOTO SEM DISTORÇÃO — 28/08/2026 ══════════════════════════════
+       Antes toda foto era desenhada com a largura e a altura do quadro
+       (`addImage(src,'JPEG',px,y,fw,fh)`), fosse ela em pé ou deitada. O
+       jsPDF não corta nem ajusta: ele ESTICA a imagem até preencher. Foto de
+       celular, que costuma ser 4:3 ou 3:4, saía achatada ou espremida.
+
+       Agora a proporção real é lida com getImageProperties e a imagem é
+       encaixada dentro do quadro, centralizada — sobra margem branca em vez
+       de deformar a peça, que é o que importa numa evidência.
+
+       O quadro também ficou mais quadrado (4 por linha em vez de 5): com
+       fotos em pé e deitadas misturadas, um quadro muito largo deixava as
+       verticais minúsculas. */
+    var cols=4,gap=4,fw=(CW-(cols-1)*gap)/cols,fh=fw*0.85,col=0;
     list.forEach(function(src){
       if(col===0)ensure(fh+gap+2);
       var px=M+col*(fw+gap);
-      try{doc.addImage(src,'JPEG',px,y,fw,fh);}catch(e){try{doc.addImage(src,'PNG',px,y,fw,fh);}catch(e2){}}
+      var lw=fw, lh=fh, ox=0, oy=0;
+      try{
+        var pr=doc.getImageProperties(src);
+        if(pr&&pr.width&&pr.height){
+          var esc=Math.min(fw/pr.width, fh/pr.height);
+          lw=pr.width*esc; lh=pr.height*esc;
+          ox=(fw-lw)/2; oy=(fh-lh)/2;      // centraliza no quadro
+        }
+      }catch(e){ /* sem as medidas, desenha como antes */ }
+      try{doc.addImage(src,'JPEG',px+ox,y+oy,lw,lh);}catch(e){try{doc.addImage(src,'PNG',px+ox,y+oy,lw,lh);}catch(e2){}}
       doc.setDrawColor(200,200,200);doc.rect(px,y,fw,fh);
       col++; if(col>=cols){col=0;y+=fh+gap;}
     });
@@ -2351,7 +2379,12 @@ function gerarPDFdoc(d,semFotos){
     doc.text(termo,M,y); y+=termo.length*4+2;
     if(d.assinatura){
       try{
+        // a assinatura também segue a proporção real, senão sai esticada
         var aw=Math.min(90,CW), ah=aw*0.33;
+        try{
+          var ap=doc.getImageProperties(d.assinatura);
+          if(ap&&ap.width&&ap.height) ah=aw*(ap.height/ap.width);
+        }catch(e){}
         doc.addImage(d.assinatura,'PNG',M,y,aw,ah);
         doc.setDrawColor(120,120,120); doc.line(M,y+ah+1,M+aw,y+ah+1);
         y+=ah+4;
