@@ -95,9 +95,22 @@
   .sqchip.on.bad{background:#fdecea;border-color:var(--vermelho);color:var(--vermelho)}
   .nabtn{flex:0 0 auto;border:1.5px solid var(--borda);border-radius:9px;background:#fafafa;font-weight:800;font-size:12px;color:#888;padding:0 14px;cursor:pointer}
   .nabtn.on{background:var(--amarelo);border-color:#000;color:#000}
-  .photos{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:8px}
+  /* No computador a grade de 3 colunas esticava até a largura toda do card,
+     e o quadro "Adicionar" virava um retângulo enorme e vazio. Limitando a
+     largura da coluna, ele fica do tamanho de um botão. */
+  .photos{display:grid;grid-template-columns:repeat(3,minmax(0,150px));gap:9px;margin-bottom:8px;justify-content:start}
   .photo{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;border:1px solid var(--borda)}
-  .photo img{width:100%;height:100%;object-fit:cover}
+  .photo img{width:100%;height:100%;object-fit:cover;cursor:zoom-in}
+  /* ── Visualizador de foto em tela cheia ── */
+  #fotoZoom{position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.92);display:none;
+    align-items:center;justify-content:center;flex-direction:column;padding:12px;gap:10px}
+  #fotoZoom.show{display:flex}
+  #fotoZoom img{max-width:96vw;max-height:80vh;object-fit:contain;border-radius:10px;background:#fff}
+  #fotoZoom .zlegenda{color:#fff;font-size:14px;font-weight:700;text-align:center}
+  #fotoZoom .zbar{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
+  #fotoZoom .zbtn{border:0;border-radius:9px;padding:10px 16px;font-weight:800;font-size:15px;
+    cursor:pointer;background:#fff;color:#111}
+  #fotoZoom .zbtn.pri{background:var(--amarelo)}
   .photo .del{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.65);color:#fff;border:none;
     width:24px;height:24px;border-radius:50%;font-size:15px;cursor:pointer;line-height:1}
   .addphoto{aspect-ratio:1;border:2px dashed var(--borda);border-radius:10px;display:flex;flex-direction:column;
@@ -529,6 +542,20 @@
   </div>
 </div>
 
+<!-- ═══ FOTO EM TELA CHEIA ═══════════════════════════════════════════════
+     Clicar em qualquer miniatura abre aqui, grande. Com setas para passar de
+     uma para outra sem precisar fechar e clicar de novo — quem confere um
+     recebimento de 7 fotos passa por todas de uma vez. -->
+<div id="fotoZoom" onclick="if(event.target===this)fecharFoto()">
+  <div class="zlegenda" id="zLegenda"></div>
+  <img id="zImg" alt="">
+  <div class="zbar">
+    <button class="zbtn" onclick="zoomAnterior()">‹ Anterior</button>
+    <button class="zbtn pri" onclick="fecharFoto()">Fechar</button>
+    <button class="zbtn" onclick="zoomProxima()">Próxima ›</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -544,7 +571,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v35';
+const APP_VERSAO='v38';
 const APP_DATA='25/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1333,11 +1360,65 @@ function addFotos(e){
 function renderFotos(){ setTimeout(function(){try{renderTodasFotos();}catch(e){}},0);
   const box=document.getElementById('photos');const add=box.querySelector('.addphoto');
   box.querySelectorAll('.photo').forEach(p=>p.remove());
+  /* As extras são as PRIMEIRAS da lista do _fotosDoRecebimento, então o índice
+     aqui é o mesmo lá — clicar abre a foto certa no visualizador. */
   fotos.forEach((src,i)=>{const d=document.createElement('div');d.className='photo';
-    d.innerHTML=`<img src="${src}"><button class="del" onclick="delFoto(${i})">×</button>`;
+    d.innerHTML=`<img src="${src}" onclick="abrirFoto(${i})" title="Ver grande"><button class="del" onclick="delFoto(${i})">×</button>`;
     box.insertBefore(d,add);});
 }
 function delFoto(i){fotos.splice(i,1);renderFotos();renderTodasFotos();}
+
+/* ═══ VER FOTO EM TELA CHEIA — 28/08/2026 ═════════════════════════════════
+   As miniaturas eram pequenas demais para conferir um defeito ou ler um
+   desenho. Agora clicar em qualquer uma abre grande, e as setas passam de uma
+   para a outra sem fechar — quem confere um recebimento de 7 fotos vê todas
+   de uma vez.
+   A lista aberta é sempre a MESMA que está na galeria do item 8, na mesma
+   ordem, para o "Próxima" bater com o que a pessoa vê na tela. */
+var _zFotos=[], _zIdx=0;
+function abrirFoto(i){
+  _zFotos=_fotosDoRecebimento();
+  if(!_zFotos.length)return;
+  _zIdx=Math.max(0,Math.min(i|0,_zFotos.length-1));
+  _zMostrar();
+  document.getElementById('fotoZoom').classList.add('show');
+}
+function _zMostrar(){
+  var it=_zFotos[_zIdx]; if(!it)return;
+  document.getElementById('zImg').src=it.src;
+  document.getElementById('zLegenda').textContent=it.rot+'  ('+(_zIdx+1)+' de '+_zFotos.length+')';
+}
+function zoomProxima(){ if(!_zFotos.length)return; _zIdx=(_zIdx+1)%_zFotos.length; _zMostrar(); }
+function zoomAnterior(){ if(!_zFotos.length)return; _zIdx=(_zIdx-1+_zFotos.length)%_zFotos.length; _zMostrar(); }
+function fecharFoto(){
+  document.getElementById('fotoZoom').classList.remove('show');
+  document.getElementById('zImg').src='';
+}
+// teclado: setas passam, Esc fecha
+document.addEventListener('keydown',function(e){
+  var z=document.getElementById('fotoZoom');
+  if(!z||!z.classList.contains('show'))return;
+  if(e.key==='Escape')fecharFoto();
+  else if(e.key==='ArrowRight')zoomProxima();
+  else if(e.key==='ArrowLeft')zoomAnterior();
+});
+
+/* Lista única de todas as fotos do recebimento, na ordem em que aparecem na
+   galeria. Usada pela galeria E pelo visualizador, para as duas nunca
+   discordarem sobre qual é a "próxima". */
+function _fotosDoRecebimento(){
+  var itens=[];
+  (fotos||[]).forEach(function(f){ if(f)itens.push({src:f,rot:'Extra'}); });
+  document.querySelectorAll('.peca').forEach(function(pe,idx){
+    var st=pecasState[+pe.id.split('-')[1]]; if(!st)return;
+    var n='Peça '+(idx+1);
+    (st.fotosPeca||[]).forEach(function(f){ if(f)itens.push({src:f,rot:n}); });
+    if(st.desenhoFoto)itens.push({src:st.desenhoFoto,rot:n+' · desenho'});
+    (st.pt||[]).forEach(function(x,i){ if(x&&x.foto)itens.push({src:x.foto,rot:n+' · ponteira '+(i+1)}); });
+    (st.fc||[]).forEach(function(x,i){ if(x&&x.foto)itens.push({src:x.foto,rot:n+' · furo '+(i+1)}); });
+  });
+  return itens;
+}
 
 /* ═══ CONFERÊNCIA: TODAS AS FOTOS DO RECEBIMENTO — 28/08/2026 ══════════════
    Mostra, num lugar só, tudo que existe de imagem: as extras do item 8 e as
@@ -1349,16 +1430,7 @@ function delFoto(i){fotos.splice(i,1);renderFotos();renderTodasFotos();}
    foto", ou é recebimento antigo, ou as imagens não chegaram da nuvem. */
 function renderTodasFotos(){
   var box=document.getElementById('todasFotos'); if(!box)return;
-  var itens=[];
-  (fotos||[]).forEach(function(f){ if(f)itens.push({src:f,rot:'Extra'}); });
-  document.querySelectorAll('.peca').forEach(function(pe,idx){
-    var st=pecasState[+pe.id.split('-')[1]]; if(!st)return;
-    var n='Peça '+(idx+1);
-    (st.fotosPeca||[]).forEach(function(f){ if(f)itens.push({src:f,rot:n}); });
-    if(st.desenhoFoto)itens.push({src:st.desenhoFoto,rot:n+' · desenho'});
-    (st.pt||[]).forEach(function(x,i){ if(x&&x.foto)itens.push({src:x.foto,rot:n+' · ponteira '+(i+1)}); });
-    (st.fc||[]).forEach(function(x,i){ if(x&&x.foto)itens.push({src:x.foto,rot:n+' · furo '+(i+1)}); });
-  });
+  var itens=_fotosDoRecebimento();
   if(!itens.length){
     box.innerHTML='<div class="alert" style="margin:0"><b>Nenhuma foto neste recebimento.</b> '
       +'Em recebimento novo a foto da peça é obrigatória (item 7). '
@@ -1366,11 +1438,12 @@ function renderTodasFotos(){
     return;
   }
   box.innerHTML='<div class="grp" style="color:#333;margin-top:0">Todas as fotos deste recebimento ('+itens.length+')</div>'
-    +'<div class="hint" style="margin-top:0;margin-bottom:6px">Só conferência. Para trocar ou apagar, é no item 7.</div>'
+    +'<div class="hint" style="margin-top:0;margin-bottom:6px">Clique numa foto para ver grande. Para trocar ou apagar, é no item 7.</div>'
     +'<div style="display:flex;flex-wrap:wrap;gap:8px">'
-    + itens.map(function(it){
+    + itens.map(function(it,i){
         return '<div style="width:104px">'
-          +'<img src="'+it.src+'" style="width:104px;height:78px;object-fit:cover;border-radius:8px;border:1px solid var(--borda);display:block">'
+          +'<img src="'+it.src+'" onclick="abrirFoto('+i+')" title="Ver grande" '
+          +'style="width:104px;height:78px;object-fit:cover;border-radius:8px;border:1px solid var(--borda);display:block;cursor:zoom-in">'
           +'<div class="mini" style="text-align:center;line-height:1.25;margin-top:2px">'+it.rot+'</div></div>';
       }).join('')
     +'</div>';
@@ -3240,12 +3313,17 @@ function _aplicaProduto(){
        voltou — então também já saiu. */
 function _jaSaiuDaAdmissao(d){
   if(!d)return false;
-  if(d.jaEnviado)return true;
+  /* 28/08/2026 — a pedido da Suzana, o COMERCIAL também abre direto no item 7.
+     Só a etapa 'admissao' (recebimento devolvido para corrigir) continua
+     abrindo com os dados da admissão à mostra, que é quando eles importam.
+
+     Uma ficha que a admissão salvou e ainda não enviou também tem etapa
+     'comercial', então ela passa a abrir no item 7. Não é perda: os campos
+     continuam ali, a um clique em "▸ Mostrar dados da admissão". Preferi isso
+     a manter o Fábio e o comercial rolando a tela toda vez, que é o caso de
+     todo dia. */
   if(d.etapa==='admissao')return false;
-  if(d.etapa==='orcamento')return true;
-  return (d.pecas||[]).some(function(p){
-    return !!(p&&(p.molde||p.formula||p.pesoOrc||p.preco||p.garantia));
-  });
+  return true;
 }
 function modoAdmissao(etapa,enviado){
   var oculta=!!enviado&&(etapa==='comercial'||etapa==='orcamento');
@@ -3564,6 +3642,8 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<!-- Storage: onde as fotos passaram a morar em 28/08/2026. Ver o módulo de fotos. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-storage-compat.js"></script>
 <script>
 (function(){
   var firebaseConfig = {
@@ -3737,123 +3817,194 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
 })();
 </script>
 
-<!-- ════════ SYNC DE FOTOS — FIREBASE (plano gratuito, coleção petro_fotos) ════════
-     As fotos não cabem no payload principal do Firestore, então cada recebimento
-     guarda suas fotos num doc próprio (petro_fotos/{id}). Assim as fotos duram
-     mesmo se a memória do aparelho encher, e chegam no aparelho do comercial
-     na hora de gerar o PDF. Mesma ideia do app da Tia Sú. -->
+<!-- ════════ FOTOS — FIREBASE STORAGE ════════════════════════════════════
+     Reescrito em 28/08/2026. Antes todas as fotos de um recebimento iam num
+     ÚNICO documento do Firestore, e documento do Firestore tem limite de 1 MB.
+     Com 5 a 7 fotos o pacote estourava e a gravação falhava EM SILÊNCIO — o
+     `catch` era vazio. Resultado confirmado na Petro: recebimentos abertos no
+     computador saíam sem foto nenhuma no PDF.
+
+     Agora cada foto é um ARQUIVO no Storage, em `recebimentos/{id}/`. Não há
+     limite prático, e uma foto que falhe falha sozinha, sem levar as outras.
+
+     O NOME DO ARQUIVO diz onde a foto encaixa de volta:
+        geral-0        → fotos gerais (item 8)
+        p0-foto-1      → peça 1, segunda foto
+        p0-desenho     → peça 1, desenho
+        p0-pt-0        → peça 1, ponteira 1
+        p0-fc-0        → peça 1, furo 1
+        assinatura     → assinatura do cliente
+     Assim não é preciso guardar índice em lugar nenhum: a própria pasta se
+     explica, e dá para conferir tudo no painel do Firebase.
+
+     COMPATIBILIDADE: recebimentos antigos, com as fotos no Firestore, continuam
+     sendo lidos de lá. Nada precisa ser migrado à mão — as fotos que ainda
+     estão nos aparelhos sobem sozinhas para o Storage na próxima abertura. -->
 <script>
 (function(){
+  var PASTA='recebimentos';
   function _fbOn(){ return (typeof firebase!=='undefined') && firebase.apps && firebase.apps.length; }
-  function _col(){ return firebase.firestore().collection('petro_fotos'); }
+  function _stOn(){ try{ return _fbOn() && !!firebase.storage; }catch(e){ return false; } }
+  function _ref(id,slot){ return firebase.storage().ref(PASTA+'/'+String(id)+'/'+slot); }
+  function _pasta(id){ return firebase.storage().ref(PASTA+'/'+String(id)); }
+  function _colAntiga(){ return firebase.firestore().collection('petro_fotos'); }
+
   function _temFotos(d){
     if(!d) return false;
-    if(d.assinatura) return true;          // a assinatura viaja junto com as fotos
+    if(d.assinatura) return true;
     if((d.fotos||[]).length) return true;
     return (d.pecas||[]).some(function(p){
       return (p&&p.desenhoFoto) ||
-        (p&&p.fotosPeca||[]).some(function(f){return !!f;}) ||
-        (p&&p.ponteiras||[]).some(function(x){return x&&x.foto;}) ||
-        (p&&p.furos||[]).some(function(x){return x&&x.foto;});
+        ((p&&p.fotosPeca)||[]).some(function(f){return !!f;}) ||
+        ((p&&p.ponteiras)||[]).some(function(x){return x&&x.foto;}) ||
+        ((p&&p.furos)||[]).some(function(x){return x&&x.foto;});
     });
   }
-  function _extrair(d){
-    return {
-      assinatura:d.assinatura||'',
-      fotos:(d.fotos||[]).slice(),
-      pecas:(d.pecas||[]).map(function(p){
-        return {
-          desenhoFoto:(p&&p.desenhoFoto)||'',
-          fotosPeca:((p&&p.fotosPeca)||[]).slice(),
-          ponteiras:((p&&p.ponteiras)||[]).map(function(x){return (x&&x.foto)||'';}),
-          furos:((p&&p.furos)||[]).map(function(x){return (x&&x.foto)||'';})
-        };
-      })
-    };
-  }
-  function _aplicar(d,b){
-    if(!b) return d;
-    if(!d.assinatura&&b.assinatura) d.assinatura=b.assinatura;
-    if((!d.fotos||!d.fotos.length)&&b.fotos&&b.fotos.length) d.fotos=b.fotos.slice();
+
+  /* Lista {slot, dados} de tudo que este registro tem de imagem. */
+  function _slots(d){
+    var out=[];
+    if(d.assinatura) out.push({slot:'assinatura',src:d.assinatura});
+    (d.fotos||[]).forEach(function(f,i){ if(f)out.push({slot:'geral-'+i,src:f}); });
     (d.pecas||[]).forEach(function(p,i){
-      var pb=b.pecas&&b.pecas[i]; if(!pb||!p) return;
-      if(!p.desenhoFoto&&pb.desenhoFoto) p.desenhoFoto=pb.desenhoFoto;
-      if((!p.fotosPeca||!p.fotosPeca.length)&&pb.fotosPeca&&pb.fotosPeca.length) p.fotosPeca=pb.fotosPeca.slice();
-      if(p.ponteiras&&pb.ponteiras) p.ponteiras.forEach(function(x,j){ if(x&&!x.foto&&pb.ponteiras[j]) x.foto=pb.ponteiras[j]; });
-      if(p.furos&&pb.furos) p.furos.forEach(function(x,j){ if(x&&!x.foto&&pb.furos[j]) x.foto=pb.furos[j]; });
+      if(!p)return;
+      (p.fotosPeca||[]).forEach(function(f,j){ if(f)out.push({slot:'p'+i+'-foto-'+j,src:f}); });
+      if(p.desenhoFoto) out.push({slot:'p'+i+'-desenho',src:p.desenhoFoto});
+      (p.ponteiras||[]).forEach(function(x,j){ if(x&&x.foto)out.push({slot:'p'+i+'-pt-'+j,src:x.foto}); });
+      (p.furos||[]).forEach(function(x,j){ if(x&&x.foto)out.push({slot:'p'+i+'-fc-'+j,src:x.foto}); });
     });
-    return d;
-  }
-  function _u(a,b){ a=a||[]; b=b||[]; var seen={},out=[]; a.concat(b).forEach(function(s){ if(s&&!seen[s]){seen[s]=1;out.push(s);} }); return out; }
-  function _mergeFotos(base,novo){
-    base=base||{fotos:[],pecas:[]}; novo=novo||{fotos:[],pecas:[]};
-    var out={assinatura:novo.assinatura||base.assinatura||'',fotos:_u(base.fotos,novo.fotos),pecas:[]};
-    var n=Math.max((base.pecas||[]).length,(novo.pecas||[]).length);
-    for(var i=0;i<n;i++){
-      var pb=(base.pecas||[])[i]||{}, pn=(novo.pecas||[])[i]||{};
-      out.pecas.push({ desenhoFoto:pn.desenhoFoto||pb.desenhoFoto||'', fotosPeca:_u(pb.fotosPeca,pn.fotosPeca), ponteiras:_u(pb.ponteiras,pn.ponteiras), furos:_u(pb.furos,pn.furos) });
-    }
     return out;
   }
-  // ---- Fila de envio das fotos (à prova de falha: retenta até subir p/ todos) ----
-  var _fila={};                                   // id -> registro com fotos aguardando subir
+
+  /* Devolve a foto ao lugar certo do registro, lendo o nome do arquivo. */
+  function _aplicarSlot(d,slot,src){
+    if(!d||!src)return;
+    if(slot==='assinatura'){ if(!d.assinatura)d.assinatura=src; return; }
+    var m=slot.match(/^geral-(\d+)$/);
+    if(m){ d.fotos=d.fotos||[]; if(!d.fotos[+m[1]])d.fotos[+m[1]]=src; return; }
+    m=slot.match(/^p(\d+)-(foto|pt|fc)-(\d+)$/);
+    if(m){
+      var p=(d.pecas||[])[+m[1]]; if(!p)return;
+      var k=+m[3];
+      if(m[2]==='foto'){ p.fotosPeca=p.fotosPeca||[]; if(!p.fotosPeca[k])p.fotosPeca[k]=src; }
+      else{
+        var lista=(m[2]==='pt')?'ponteiras':'furos';
+        p[lista]=p[lista]||[];
+        p[lista][k]=p[lista][k]||{q:'',obs:'',foto:''};
+        if(!p[lista][k].foto)p[lista][k].foto=src;
+      }
+      return;
+    }
+    m=slot.match(/^p(\d+)-desenho$/);
+    if(m){ var pp=(d.pecas||[])[+m[1]]; if(pp&&!pp.desenhoFoto)pp.desenhoFoto=src; }
+  }
+
+  /* ---- Fila de envio: retenta até subir, e AVISA quando não consegue ---- */
+  var _fila={}, _falhas={};
   function _syncSet(){ try{ return JSON.parse(localStorage.getItem('petro_fotos_sync')||'[]'); }catch(e){ return []; } }
-  /* A limpeza de 30 dias precisa saber o que já subiu, para não apagar do
-     aparelho foto que a nuvem nunca recebeu. Ver _limparFotosAntigas. */
-  window._fotosSincronizadas=_syncSet;
+  window._fotosSincronizadas=_syncSet;   // usado pela limpeza de 30 dias
   function _marcaSync(id){ try{ var s=_syncSet(); if(s.indexOf(String(id))<0){ s.push(String(id)); localStorage.setItem('petro_fotos_sync',JSON.stringify(s)); } }catch(e){} }
+
   function _subirUm(id){
-    var d=_fila[id]; if(!d) return;
-    var ref=_col().doc(String(id)), novo=_extrair(d);
-    ref.get().then(function(snap){
-      var base={fotos:[],pecas:[]};
-      if(snap&&snap.exists){ var data=snap.data(); if(data&&data.payload){ try{ base=JSON.parse(data.payload); }catch(e){} } }
-      ref.set({payload:JSON.stringify(_mergeFotos(base,novo)),updatedAt:Date.now()})
-        .then(function(){ delete _fila[id]; _marcaSync(id); }).catch(function(){});
-    }).catch(function(){
-      ref.set({payload:JSON.stringify(novo),updatedAt:Date.now()})
-        .then(function(){ delete _fila[id]; _marcaSync(id); }).catch(function(){});
+    var d=_fila[id]; if(!d||!_stOn())return;
+    var itens=_slots(d);
+    if(!itens.length){ delete _fila[id]; _marcaSync(id); return; }
+    // o que já está lá não sobe de novo — economiza dado e tempo na retentativa
+    _pasta(id).listAll().then(function(res){
+      var existe={}; (res.items||[]).forEach(function(it){ existe[it.name.replace(/\.[a-z]+$/i,'')]=1; });
+      var faltam=itens.filter(function(it){ return !existe[it.slot]; });
+      if(!faltam.length){ delete _fila[id]; _marcaSync(id); return; }
+      return Promise.all(faltam.map(function(it){
+        return _ref(id,it.slot).putString(it.src,'data_url');
+      })).then(function(){
+        delete _fila[id]; delete _falhas[id]; _marcaSync(id);
+      });
+    }).catch(function(err){
+      /* ERRO VISÍVEL, ao contrário do catch vazio de antes. Só avisa uma vez
+         por recebimento, para não virar alarme repetido a cada 12 segundos. */
+      if(!_falhas[id]){
+        _falhas[id]=1;
+        console.error('[Petro] fotos não subiram (id '+id+'):',err);
+        if(typeof toast==='function')toast('⚠️ As fotos de um recebimento não subiram. Elas seguem no aparelho — avise a Suzana.');
+      }
     });
   }
-  function _flush(){ if(!_fbOn()) return; Object.keys(_fila).forEach(_subirUm); }
-  setInterval(_flush, 12000);                      // re-tenta o que ficou pendente
-  if(typeof window!=='undefined') window.addEventListener('online', _flush);
+  function _flush(){ if(!_stOn())return; Object.keys(_fila).forEach(_subirUm); }
+  setInterval(_flush,12000);
+  if(typeof window!=='undefined') window.addEventListener('online',_flush);
 
   window._fotosEnviarNuvem=function(d){
-    try{
-      if(!d||d.id==null||!_temFotos(d)) return;
-      _fila[String(d.id)]=d;                        // entra na fila e sobe (com retentativa)
-      _flush();
-    }catch(e){}
+    try{ if(!d||d.id==null||!_temFotos(d))return; _fila[String(d.id)]=d; _flush(); }catch(e){}
   };
-  // ao abrir/atualizar a lista, reenfileira fichas com fotos que ainda não confirmaram subida
   window._fotosGarantirNuvem=function(arr){
     try{
-      if(!arr||!arr.length) return;
+      if(!arr||!arr.length)return;
       var s=_syncSet();
       arr.forEach(function(d){ if(d&&d.id!=null&&_temFotos(d)&&s.indexOf(String(d.id))<0){ _fila[String(d.id)]=d; } });
       _flush();
     }catch(e){}
   };
+
+  /* ---- Leitura: Storage primeiro, Firestore antigo como reserva ---- */
+  function _baixar(ref){
+    return ref.getDownloadURL()
+      .then(function(url){ return fetch(url); })
+      .then(function(r){ if(!r.ok)throw new Error('http '+r.status); return r.blob(); })
+      .then(function(b){ return new Promise(function(res,rej){
+        var fr=new FileReader(); fr.onload=function(){res(fr.result);}; fr.onerror=rej; fr.readAsDataURL(b);
+      });});
+  }
   window._comFotosDaNuvem=function(d,cb){
     try{
-      if(_temFotos(d)){ cb(d); return; }         // já tenho as fotos localmente
+      if(_temFotos(d)){ cb(d); return; }        // já estão neste aparelho
       if(!_fbOn()){ cb(d); return; }
       var done=false, fim=function(){ if(done)return; done=true; cb(d); };
-      var t=setTimeout(fim,8000);
-      _col().doc(String(d.id)).get().then(function(snap){
-        clearTimeout(t);
-        if(snap&&snap.exists){ var data=snap.data(); if(data&&data.payload){ try{ _aplicar(d,JSON.parse(data.payload)); }catch(e){} } }
-        fim();
-      }).catch(function(){ clearTimeout(t); fim(); });
+      var t=setTimeout(fim,15000);              // foto por foto demora mais que um doc só
+      _pasta(d.id).listAll().then(function(res){
+        var itens=res.items||[];
+        if(!itens.length) throw new Error('vazio');
+        return Promise.all(itens.map(function(it){
+          return _baixar(it).then(function(src){ _aplicarSlot(d,it.name.replace(/\.[a-z]+$/i,''),src); })
+                            .catch(function(){});
+        }));
+      }).then(function(){ clearTimeout(t); fim(); })
+        .catch(function(){
+          /* Sem nada no Storage: é recebimento antigo, com as fotos no
+             Firestore. Lê de lá para o histórico continuar abrindo. */
+          _colAntiga().doc(String(d.id)).get().then(function(snap){
+            clearTimeout(t);
+            if(snap&&snap.exists){
+              var data=snap.data();
+              if(data&&data.payload){ try{
+                var b=JSON.parse(data.payload);
+                if(b.assinatura&&!d.assinatura)d.assinatura=b.assinatura;
+                if((b.fotos||[]).length&&!(d.fotos||[]).length)d.fotos=b.fotos.slice();
+                (d.pecas||[]).forEach(function(p,i){
+                  var pb=(b.pecas||[])[i]; if(!pb||!p)return;
+                  if(!p.desenhoFoto&&pb.desenhoFoto)p.desenhoFoto=pb.desenhoFoto;
+                  if(!(p.fotosPeca||[]).length&&(pb.fotosPeca||[]).length)p.fotosPeca=pb.fotosPeca.slice();
+                  (p.ponteiras||[]).forEach(function(x,j){ if(x&&!x.foto&&pb.ponteiras&&pb.ponteiras[j])x.foto=pb.ponteiras[j]; });
+                  (p.furos||[]).forEach(function(x,j){ if(x&&!x.foto&&pb.furos&&pb.furos[j])x.foto=pb.furos[j]; });
+                });
+              }catch(e){} }
+            }
+            fim();
+          }).catch(function(){ clearTimeout(t); fim(); });
+        });
     }catch(e){ cb(d); }
   };
-  // ao excluir um recebimento, apaga também as fotos na nuvem
+
+  // excluir recebimento apaga também as fotos, nos dois lugares
   if(typeof window.excluirRec==='function'){
     var _ex=window.excluirRec;
     window.excluirRec=function(id){
       _ex(id);
-      try{ if(_fbOn()) _col().doc(String(id)).delete().catch(function(){}); }catch(e){}
+      try{
+        if(_stOn()) _pasta(id).listAll().then(function(res){
+          (res.items||[]).forEach(function(it){ it.delete().catch(function(){}); });
+        }).catch(function(){});
+        if(_fbOn()) _colAntiga().doc(String(id)).delete().catch(function(){});
+      }catch(e){}
     };
   }
 })();
