@@ -505,7 +505,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v27';
+const APP_VERSAO='v28';
 const APP_DATA='25/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3593,18 +3593,25 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
 
   try{ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); }catch(e){}
 
+  /* Marca que ESTE aparelho está no meio de um login agora.
+     Sem isto o app se derruba sozinho — ver a explicação no onAuthStateChanged. */
+  var _entrando=false;
+
   function entrar(){
     var em=(elEmail.value||'').trim().toLowerCase();
     var pw=document.getElementById('lgPass').value||'';
     var err=document.getElementById('lgErr'); err.textContent='';
     if(!em||!pw){ err.textContent='Preencha e-mail e senha.'; return; }
     var btn=document.getElementById('lgBtn'); btn.disabled=true; btn.textContent='Entrando…';
+    _entrando=true;
     auth.signInWithEmailAndPassword(em,pw)
       .then(function(cred){
         _sessaoGravar((cred&&cred.user&&cred.user.email)||em);
+        _entrando=false;
         location.reload();
       })
       .catch(function(e){
+        _entrando=false;
         btn.disabled=false; btn.textContent='Entrar';
         var c=e&&e.code;
         err.textContent = (c==='auth/too-many-requests') ? 'Muitas tentativas. Aguarde um pouco.'
@@ -3622,6 +3629,14 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
 
   auth.onAuthStateChanged(function(u){
     if(!u){ _sessaoLimpar(); _bloquear(); return; }
+    /* ═══ CORRIGIDO EM 26/08/2026 — ninguém conseguia entrar ═══════════════
+       O Firebase avisa aqui que a pessoa entrou ANTES de o .then() do
+       signInWithEmailAndPassword rodar e gravar a sessão do dia. Sem esta
+       guarda, o app olhava, não achava a anotação de hoje, concluía "sessão de
+       ontem" e deslogava na hora — ou seja, o próprio login era confundido com
+       uma sessão vencida, e a tela voltava para o começo. Bloqueava todo mundo.
+       Estando no meio de um login, a sessão é gravada aqui mesmo. */
+    if(_entrando){ _sessaoGravar(u.email||''); _liberar(); return; }
     if(!_sessaoValida()){
       /* Logado no Firebase, mas a sessão deste aparelho é de ONTEM. É aqui que
          a expiração diária acontece: desloga e pede a senha de novo, para o
