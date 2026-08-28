@@ -183,6 +183,17 @@
 <div id="view-novo">
 <div class="wrap">
 
+  <!-- Barra de edição: só aparece quando se está EDITANDO um recebimento.
+       Sem ela, quem abria uma ficha pela lista não tinha saída visível — só a
+       aba "Salvos" lá em cima, que não parece um "fechar". -->
+  <div id="edBarra" class="hide" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 12px;border-radius:10px;background:#FCF3CF;border:1px solid #FFCC00">
+    <div style="flex:1;min-width:0">
+      <b style="font-size:13px;color:#8a6d00">✏️ Editando</b>
+      <div id="edInfo" class="mini" style="color:#8a6d00"></div>
+    </div>
+    <button class="btn btn-sec" style="font-weight:800;white-space:nowrap" onclick="fecharEdicao()">✕ Fechar</button>
+  </div>
+
   <div id="admToggle" class="hide" style="margin-bottom:12px">
     <button class="btn btn-sec" style="width:100%;font-weight:700" onclick="toggleAdm()"><span id="admToggleTxt">▸ Mostrar dados da admissão</span></button>
   </div>
@@ -526,7 +537,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v33';
+const APP_VERSAO='v34';
 const APP_DATA='25/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3062,13 +3073,20 @@ function carregarParaEditar(id){
   setV('assNome',d.assinanteNome); setV('assDoc',d.assinanteDoc);
   if(typeof assCarregar==='function')assCarregar(d.assinatura||'');
   if(typeof aplicarModoServico==='function')aplicarModoServico(); // aplica o modo do item 6 nas peças recém-montadas
-  initSecoes(); modoAdmissao(d.etapa,d.jaEnviado);
+  initSecoes();
+  var _saiu=_jaSaiuDaAdmissao(d);
+  modoAdmissao(d.etapa,_saiu);
+  try{
+    var eb=document.getElementById('edBarra'), ei=document.getElementById('edInfo');
+    if(ei)ei.textContent=(d.cliente||'—')+(d.nf?(' · NF '+d.nf):'')+' · '+fmtData(d.data);
+    if(eb)eb.classList.remove('hide');
+  }catch(e){}
   // busca as fotos na nuvem e mostra dentro do formulário (caso este aparelho ainda não tenha)
   if(typeof _comFotosDaNuvem==='function'){ _comFotosDaNuvem(Object.assign({},d,{pecas:(d.pecas||[]).map(function(p){return Object.assign({},p);})}), _reaplicarFotosForm); }
   /* Só vai para o topo quando a admissão está visível. Com ela escondida
      (comercial/orçamento), quem manda é o modoAdmissao, que rola até o item 7 —
      e um scrollTo(0,0) aqui desfaria isso. */
-  if(!(d.jaEnviado&&(d.etapa==='comercial'||d.etapa==='orcamento')))window.scrollTo(0,0);
+  if(!_saiu)window.scrollTo(0,0);
   toast('Editando — altere e toque em Enviar');
 }
 // aplica no formulário aberto as fotos vindas da nuvem
@@ -3158,13 +3176,44 @@ var _MOSTRA_PRODUTO=false;
 function _aplicaProduto(){
   document.querySelectorAll('.produtoBox').forEach(function(x){ x.classList.toggle('hide',!_MOSTRA_PRODUTO); });
 }
+/* ═══ "ESTE RECEBIMENTO JÁ SAIU DA ADMISSÃO?" — corrigido em 26/08/2026 ═════
+   Queixa: o orçamento pendente não abria no item 7, e os campos da admissão
+   continuavam aparecendo para o Fábio.
+
+   A causa: `jaEnviado` **não tem coluna na planilha** — zero ocorrências no
+   Code.gs. Ele só existe no aparelho que fez o envio e no Firebase. Quando a
+   ficha é lida da planilha (que é o caso de quem abre no computador), chega
+   sem esse campo, e a regra antiga — que exigia `jaEnviado` — nunca era
+   satisfeita. Por isso não escondia a admissão nem pulava para as peças.
+
+   Aqui a resposta é DEDUZIDA do que a planilha guarda:
+     • etapa 'orcamento'  → só existe porque alguém enviou. Já saiu.
+     • etapa 'admissao'   → foi DEVOLVIDO para a admissão: ela precisa ver tudo.
+     • etapa 'comercial'  → é o padrão de recebimento novo, não prova nada.
+       Mas se já tem dado de orçamento preenchido, passou pelo orçamento e
+       voltou — então também já saiu. */
+function _jaSaiuDaAdmissao(d){
+  if(!d)return false;
+  if(d.jaEnviado)return true;
+  if(d.etapa==='admissao')return false;
+  if(d.etapa==='orcamento')return true;
+  return (d.pecas||[]).some(function(p){
+    return !!(p&&(p.molde||p.formula||p.pesoOrc||p.preco||p.garantia));
+  });
+}
 function modoAdmissao(etapa,enviado){
   var oculta=!!enviado&&(etapa==='comercial'||etapa==='orcamento');
   // mesma condição: onde a admissão some, o Produto aparece
   _MOSTRA_PRODUTO=oculta; _aplicaProduto();
   var tg=document.getElementById('admToggle'); if(tg)tg.classList.toggle('hide',!oculta);
   _admAberto=!oculta; _aplicaAdm();
-  if(!oculta)return;
+  if(!oculta){
+    /* Volta para a primeira seção. Sem isto, quem editava um orçamento (que
+       abre no item 7) e depois abria um recebimento novo continuava no item 7,
+       com a admissão visível mas fora de vista — parte do "fica bugado". */
+    try{ irSecao(0); }catch(e){}
+    return;
+  }
   /* ABRE DIRETO NO ITEM 7 — 26/08/2026
      Queixa do Fábio: o orçamento pendente abria no item 1 e ele tinha que
      procurar as peças toda vez.
@@ -3194,9 +3243,19 @@ function initSecoes(){
     _cards().forEach(function(c){ c.classList.remove('ativa'); });
   }
 }
+/* Sai da edição e volta para a lista, com o formulário limpo. Sem isto, abrir
+   outra ficha em seguida herdava pedaços da anterior — foi o "fica bugado". */
+function fecharEdicao(){
+  editId=null;
+  limparForm(false);
+  var eb=document.getElementById('edBarra'); if(eb)eb.classList.add('hide');
+  modoAdmissao('',false);      // devolve a admissão à vista para o próximo
+  verTab('lista');
+}
 function limparForm(ask){
   if(ask&&!confirm('Limpar o formulário?'))return;
   editId=null;fotos=[];embTipoSel.clear();
+  var _eb=document.getElementById('edBarra'); if(_eb&&!editId)_eb.classList.add('hide');
   ['resp','cliente','contato','fone','transpDesc','nf','embTipoDesc','servicoDesc','obs','nfQtdeNota','nfQtdeReceb','assNome','assDoc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   if(typeof assLimpar==='function'){ try{ assLimpar(); }catch(e){} }
   var _nsn=document.getElementById('nfSemNota');if(_nsn)_nsn.checked=false;
