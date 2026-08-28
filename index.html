@@ -505,7 +505,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v21';
+const APP_VERSAO='v25';
 const APP_DATA='25/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -550,8 +550,8 @@ bindChipsSingle('servico','servico','servicoDesc',['Outros'],function(){ aplicar
 const _BLOCOS_ESCONDIDOS={
   normal:          ['info'],
   retifica:        ['info','dursol'],
-  tecnica:         ['rev','med','dureza','desenho','acab','acess','tipopeca','peso','insp'],
-  desenvolvimento: ['rev','med','espec','dureza','desenho','acab','acess','tipopeca','peso','insp']
+  tecnica:         ['rev','med','dureza','desenho','acab','acess','tipopeca','insp'],
+  desenvolvimento: ['rev','med','espec','dureza','desenho','acab','acess','tipopeca','insp']
 };
 const _DICA_SERVICO={
   retifica:'Retífica: só a dureza medida. A solicitada não se aplica.',
@@ -702,7 +702,7 @@ const SUBLBL={pt:'Ponteira', fc:'Furo de centro'};
 function addPeca(){
   const id=++pecaSeq;
   pecasState[id]={cb:'',tipo:'',visual:{},acab:'',acabSet:new Set(),acessSN:'',acessSet:new Set(),
-    ptSN:'',fcSN:'',pt:[],fc:[],estado:'',desenhoSN:'',desenhoFoto:'',fotosPeca:[]};
+    ptSN:'',fcSN:'',pt:[],fc:[],estado:'',desenhoSN:'',desenhoFoto:'',fotosPeca:[],garantia:''};
   const div=document.createElement('div');
   div.className='peca'; div.id='peca-'+id;
   div.innerHTML=`
@@ -888,7 +888,14 @@ function addPeca(){
     <div class="hint" style="margin-top:2px">Eixo → pede ponteiras e furo de centro. Outros tipos → só a foto da peça.</div>
     </div><!-- /data-blk=tipopeca -->
 
-    <div data-blk="peso">
+    <!-- PESO DA PEÇA RECEBIDA — escondido em 26/08/2026, a pedido da Suzana:
+         "não é necessário, somente o peso para composição do orçamento".
+         O que vale é o "Peso da fórmula (kg)", no bloco do orçamento.
+         O input NÃO foi apagado, de propósito: recebimentos antigos têm peso
+         gravado, e tirar o campo faria a próxima edição gravar vazio por cima
+         na planilha — a mesma perda do friso (v18) e do produto (v21).
+         Fica fora do controle por tipo de serviço (data-blk): some sempre. -->
+    <div style="display:none">
     <label>Peso da peça recebida (kg)</label>
     <input type="text" inputmode="decimal" class="p_peso">
     </div>
@@ -936,13 +943,26 @@ function addPeca(){
 
     <div class="orcBlock hide">
     <div class="grp" style="margin-top:10px;color:#8a6d00;border-top:2px solid #FFCC00;padding-top:8px">Orçamento <span style="font-weight:600;color:#999;font-size:12px">(preenchido pelo orçamento)</span></div>
+    <!-- GARANTIA — 26/08/2026. Por PEÇA, e não por recebimento: acontece de vir
+         uma peça em garantia junto com outras cobradas, e separar isso depois,
+         no meio de um orçamento fechado, é o pior lugar para descobrir. -->
+    <div class="grp" style="color:#333;margin-top:4px">É garantia?</div>
+    <div class="seg garseg" data-pid="${id}">
+      <button data-v="Não">Não</button>
+      <button data-v="Sim">Sim, garantia</button>
+    </div>
+    <div class="garBox hide" id="garBox-${id}" style="margin-top:8px">
+      <label>Motivo da garantia <span style="color:var(--vermelho)">*</span></label>
+      <input type="text" class="p_garmotivo" placeholder="Ex.: descolou antes do prazo, dureza fora do especificado…">
+      <div class="alert" style="margin-top:2px"><b>Peça em garantia — sem cobrança.</b> Preencha molde e fórmula do mesmo jeito: eles é que dizem como refazer.</div>
+    </div>
     <div style="display:flex;gap:8px">
       <div style="flex:1"><label style="font-size:12px">Molde</label><input type="text" class="p_molde" style="margin-bottom:6px"></div>
       <div style="flex:1"><label style="font-size:12px">Fórmula</label><input type="text" class="p_formula" style="margin-bottom:6px"></div>
     </div>
     <div style="display:flex;gap:8px">
       <div style="flex:1"><label style="font-size:12px">Peso da fórmula (kg)</label><input type="text" inputmode="decimal" class="p_pesoorc" style="margin-bottom:6px"></div>
-      <div style="flex:1"><label style="font-size:12px">Preço (R$)</label><input type="text" inputmode="decimal" class="p_preco" style="margin-bottom:6px" onblur="formatMoeda(this)"></div>
+      <div style="flex:1" class="precoBox"><label style="font-size:12px">Preço (R$)</label><input type="text" inputmode="decimal" class="p_preco" style="margin-bottom:6px" onblur="formatMoeda(this)"></div>
     </div>
     </div>
   `;
@@ -955,6 +975,20 @@ function addPeca(){
       b.classList.add('on'); pecasState[id].cb=b.dataset.v;
       document.getElementById('cbalert-'+id).classList.toggle('hide',b.dataset.v!=='S/B');
       div.querySelectorAll('.revmed').forEach(x=>x.classList.toggle('hide',b.dataset.v==='S/B'));
+    };
+  });
+  // é garantia? (só no bloco do orçamento)
+  div.querySelectorAll('.garseg button').forEach(b=>{
+    b.onclick=()=>{
+      div.querySelectorAll('.garseg button').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on'); pecasState[id].garantia=b.dataset.v;
+      var ehGar=(b.dataset.v==='Sim');
+      var box=document.getElementById('garBox-'+id); if(box)box.classList.toggle('hide',!ehGar);
+      /* Em garantia não se cobra, então o campo Preço some — pedido da Suzana.
+         O input continua no formulário (só escondido): se a peça já tinha preço
+         e alguém marcar garantia por engano, o valor não é perdido ao salvar. */
+      var pb=div.querySelector('.precoBox'); if(pb)pb.classList.toggle('hide',ehGar);
+      _resumoPeca(div);
     };
   });
   // tem desenho? (Sim → foto)
@@ -1288,6 +1322,7 @@ function coletarPecas(){
       acessSN:acessSN,acess:acess,acessDados:acessItens,acessOutros:acessOutros,
       peso:g('p_peso'),
       info:g('p_info'),   // texto livre da peça técnica / desenvolvimento
+      garantia:pecasState[id].garantia||'',garMotivo:g('p_garmotivo'),
       molde:g('p_molde'),formula:g('p_formula'),pesoOrc:g('p_pesoorc'),preco:g('p_preco'),
       desenhoSN:st.desenhoSN||'',desenhoFoto:st.desenhoFoto||'',fotosPeca:(st.fotosPeca||[]).slice(),
       ponteiraSN:ptSN,ponteiras:ptArr,furoSN:fcSN,furos:fcArr,estado:estado,
@@ -1363,6 +1398,8 @@ function salvarFicha(enviarDepois){
     }
     if(!st.tipo)erros.push(n+'Tipo de peça');
     else if(st.tipo==='Outros'&&faltou('p_tipooutros'))erros.push(n+'Tipo de peça: descrever qual');
+    // garantia sem motivo não serve de registro: meses depois ninguém sabe por quê
+    if(st.garantia==='Sim'&&faltou('p_garmotivo'))erros.push(n+'Motivo da garantia');
     if(st.tipo==='Eixo'){
       if(!st.ptSN)erros.push(n+'Ponteira (Conforme/Não conforme)');
       else{
@@ -1398,7 +1435,23 @@ function salvarFicha(enviarDepois){
 // ============ ENVIO POR E-MAIL (destino + anexo) ============
 const AREAS={comercial:{nome:'Comercial'},orcamento:{nome:'Orçamento'},admissao:{nome:'Admissão / Produção'},cliente:{nome:'Cliente'}};
 let _enviarId=null,_enviarDestino='comercial',_enviarPrimeiro=false;
-function _emailDaArea(a){ if(a==='cliente'){var e=document.getElementById('envEmailCliente');return e?e.value.trim():'';} return a==='comercial'?EMAIL_COM:(a==='orcamento'?EMAIL_ORC:EMAIL_ADM); }
+/* O ORÇAMENTO (Fábio) não entra no fluxo da admissão — 26/08/2026.
+   Pedido da Suzana: quando o Emerson dá entrada numa admissão, o Fábio recebia
+   e-mail. Ele só deve entrar quando o comercial manda para o orçamento.
+   A trava é feita AQUI, no código, e não só apagando o endereço da ⚙️ de cada
+   aparelho: basta alguém digitar o e-mail dele no campo do comercial em um
+   celular para o problema voltar, e ninguém ia lembrar por quê. */
+function _semEmailDoOrcamento(lista){
+  var orc=String(EMAIL_ORC||'').toLowerCase().split(/[,;]/).map(function(s){return s.trim();}).filter(Boolean);
+  if(!orc.length)return lista;
+  return String(lista||'').split(/[,;]/).map(function(s){return s.trim();})
+    .filter(function(x){ return x && orc.indexOf(x.toLowerCase())<0; }).join(', ');
+}
+function _emailDaArea(a){
+  if(a==='cliente'){var e=document.getElementById('envEmailCliente');return e?e.value.trim():'';}
+  if(a==='comercial')return _semEmailDoOrcamento(EMAIL_COM);
+  return (a==='orcamento')?EMAIL_ORC:EMAIL_ADM;
+}
 function _getCliEmail(nome){ try{var m=JSON.parse(localStorage.getItem('petro_cliemail')||'{}');return m[(nome||'').toLowerCase().trim()]||'';}catch(e){return '';} }
 function _setCliEmail(nome,email){ try{var m=JSON.parse(localStorage.getItem('petro_cliemail')||'{}');m[(nome||'').toLowerCase().trim()]=email;localStorage.setItem('petro_cliemail',JSON.stringify(m));}catch(e){} }
 function openEnviar(id){
@@ -1418,7 +1471,7 @@ function openEnviar(id){
      nunca saía de "Pendente Orçamento". Agora, se a etapa é Orçamento e o
      orçamento JÁ está preenchido (molde/fórmula/peso/preço em alguma peça), o
      padrão passa a ser Comercial, que é para onde o trabalho segue. */
-  var _orcFeito=((d.pecas||[]).some(function(p){return !!(p&&(p.molde||p.formula||p.pesoOrc||p.preco));}));
+  var _orcFeito=((d.pecas||[]).some(function(p){return !!(p&&(p.molde||p.formula||p.pesoOrc||p.preco||p.garantia));}));
   var destino=_enviarPrimeiro?'comercial'
     :((d.etapa==='orcamento'&&_orcFeito)?'comercial'
     :((d.etapa==='admissao'||d.etapa==='comercial'||d.etapa==='orcamento')?d.etapa:'comercial'));
@@ -1478,9 +1531,20 @@ function confirmarEnviar(){
   arr.forEach(function(a){if(String(a.id)===String(id)){ if(dest!=='cliente'){a.etapa=dest;a.etapaEm=now;} a.jaEnviado=true; a.updatedAt=now; }});
   try{localStorage.setItem('petro_receb',JSON.stringify(arr));}catch(e){}
   (LISTA_ATUAL||[]).forEach(function(a){if(String(a.id)===String(id)){ if(dest!=='cliente'){a.etapa=dest;a.etapaEm=now;} a.jaEnviado=true; a.updatedAt=now; }});
+  /* ═══ UMA CHAMADA DE CADA VEZ — 26/08/2026 ═══════════════════════════════
+     Aqui saíam DUAS chamadas ao Apps Script quase juntas: a troca de etapa e,
+     logo atrás, o e-mail. O Apps Script executa uma coisa por vez por usuário;
+     chegando as duas ao mesmo tempo, uma era enfileirada e às vezes descartada.
+     Como o envio é "fire and forget", o app nunca soube — e o resultado era:
+       • caiu o e-mail  → só ia na segunda tentativa;
+       • caiu a etapa   → o item continuava "Pendente Orçamento".
+     Agora o e-mail espera a etapa terminar (ver `mandar`). O Code.gs também
+     ganhou LockService, para o que ainda assim se cruzar esperar a vez em vez
+     de ser descartado. */
+  var _etapaEnviada=Promise.resolve();
   // grava a etapa NA PLANILHA também. Sem isto a mudança só existia neste aparelho
   // (e no Firebase) — quem lia pela planilha via tudo como "Pendente Comercial".
-  if(dest!=='cliente'&&SHEET_URL)postSheet(SHEET_URL,{action:'etapa',id:id,etapa:dest});
+  if(dest!=='cliente'&&SHEET_URL)_etapaEnviada=postSheet(SHEET_URL,{action:'etapa',id:id,etapa:dest});
   if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
   var nomeArea=AREAS[dest].nome;
   var assunto=_prefixoAssunto(dest,_etapaAnt)+_tituloFicha(d);
@@ -1491,7 +1555,16 @@ function confirmarEnviar(){
     if(anexar && window.jspdf && window.jspdf.jsPDF){
       try{ var doc=gerarPDFdoc(dd); payload.mime='application/pdf'; payload.nome=_pdfFileName(dd); payload.arquivo=doc.output('datauristring'); }catch(e){console.error(e);}
     }
-    if(SHEET_URL)postSheet(SHEET_URL,payload);
+    /* Espera a gravação da etapa antes de mandar o e-mail. O `no-cors` resolve
+       assim que a requisição sai, não quando o script termina — por isso a
+       folga de 1,2s. Quem garante mesmo é o LockService no Code.gs; isto aqui
+       só evita que as duas cheguem juntas e uma tenha que esperar à toa. */
+    if(SHEET_URL){
+      _etapaEnviada
+        .then(function(){ return new Promise(function(r){ setTimeout(r,1200); }); })
+        .then(function(){ return postSheet(SHEET_URL,payload); })
+        .catch(function(){ postSheet(SHEET_URL,payload); });
+    }
     var lbl=document.getElementById('origemLbl');
     renderFromArray(LISTA_ATUAL,lbl?lbl.textContent:'',ACOES_ATUAL);
     toast('Enviado para '+nomeArea+' ✓');
@@ -1517,7 +1590,7 @@ const _ROTULOS={resp:'Responsável',data:'Data',cliente:'Cliente',contato:'Conta
 const _ROTULOS_PECA={cb:'C/B ou S/B',tipo:'Tipo de peça',produto:'Produto',qtde:'Qtde',
   dint:'Ø int ferro',dextsol:'Ø ext sol',dextmed:'Ø ext med',areautil:'Comp área útil',
   compsol:'Comp borr sol',compmed:'Comp borr med',durmed:'Dureza med/cor',dursol:'Dureza sol',
-  peso:'Peso',acabamento:'Acabamento',acess:'Acessórios',estado:'Estado geral',
+  peso:'Peso',acabamento:'Acabamento',acess:'Acessórios',estado:'Estado geral',garantia:'Garantia',garMotivo:'Motivo da garantia',
   molde:'Molde',formula:'Fórmula',pesoOrc:'Peso orçamento',preco:'Preço'};
 function _diffFicha(antes,depois){
   if(!antes||!depois)return '';
@@ -1704,7 +1777,7 @@ function gerarRelatorio(d){
     x.fillText('R 02-1 · App de Recebimento · Borrachas Petro · '+d.criado,W/2,H-20);x.textAlign='left';
     if(SHEET_URL&&EMAIL_COM){
       const b64=cv.toDataURL('image/jpeg',0.85);
-      postSheet(SHEET_URL,{action:'email',to:EMAIL_COM,assunto:'ADMISSÃO RECEBIDA — '+_tituloFicha(d),resumo:montarTexto(d),arquivo:b64,nome:'Recebimento_'+(d.cliente||'rolo').replace(/\s/g,'_')+'.jpg'});
+      postSheet(SHEET_URL,{action:'email',to:_emailDaArea('comercial'),assunto:'ADMISSÃO RECEBIDA — '+_tituloFicha(d),resumo:montarTexto(d),arquivo:b64,nome:'Recebimento_'+(d.cliente||'rolo').replace(/\s/g,'_')+'.jpg'});
       toast('Enviado por e-mail ao comercial'); return;
     }
     cv.toBlob(blob=>{
@@ -1803,8 +1876,9 @@ function gerarPDFdoc(d){
       {h:'Ø int',w:14,g:function(p){return p.dint||'';}},
       {h:'Ø ext sol',w:15,g:function(p){return p.dextsol||'';}},
       {h:'Ø ext med',w:15,g:function(p){return p.dextmed||'';}},
-      {h:'Comp útil',w:15,g:function(p){return p.areautil||'';}},
+      // 26/08/2026: comprimento SOLICITADO vem antes do útil, a pedido da Suzana
       {h:'Comp sol',w:15,g:function(p){return p.compsol||'';}},
+      {h:'Comp útil',w:15,g:function(p){return p.areautil||'';}},
       {h:'Comp med',w:15,g:function(p){return p.compmed||'';}},
       {h:'Produto',w:20,g:function(p){return p.produto||'';}},
       {h:'Qtde',w:11,g:function(p){return p.qtde||'';}},
@@ -1818,6 +1892,8 @@ function gerarPDFdoc(d){
       {h:'Desenho',w:12,g:function(p){return p.desenhoSN||'';}}
     ];
     var orc=[
+      {h:'Garantia',w:12,orc:true,g:function(p){return p.garantia||'';}},
+      {h:'Motivo garantia',w:26,orc:true,g:function(p){return p.garMotivo||'';}},
       {h:'Molde',w:16,orc:true,g:function(p){return p.molde||'';}},
       {h:'Fórmula',w:18,orc:true,g:function(p){return p.formula||'';}},
       {h:'Peso fórmula (kg)',w:15,orc:true,g:function(p){return p.pesoOrc||'';}},
@@ -2019,7 +2095,7 @@ function orcamentoPronto(id){
   (LISTA_ATUAL||[]).forEach(function(a){if(String(a.id)===String(id)){a.orcPronto=true;a.orcProntoEm=now;a.etapa='comercial';a.etapaEm=now;a.updatedAt=now;}});
   if(SHEET_URL)postSheet(SHEET_URL,{action:'etapa',id:id,etapa:'comercial'}); // grava a volta na planilha
   if(SHEET_URL&&EMAIL_COM){
-    postSheet(SHEET_URL,{action:'email',to:EMAIL_COM,
+    postSheet(SHEET_URL,{action:'email',to:_emailDaArea('comercial'),
       assunto:'CUSTO FINALIZADO — '+_tituloFicha(d),
       resumo:'O orçamento foi preenchido e está pronto para lançar no Naphta:\n\n'+_resumoOrc(d)});
   }
@@ -2034,7 +2110,7 @@ function _resumoOrc(d){
     // identifica pelo TIPO (o Produto saiu do formulário em 25/08/2026);
     // registros antigos ainda caem no produto, que é o que eles têm
     var _idp=(p.tipo||p.produto||'—');
-    t+='Peça '+(i+1)+': '+_idp+' — Molde: '+(p.molde||'—')+' | Fórmula: '+(p.formula||'—')+' | Peso: '+(p.pesoOrc||p.peso||'—')+' | Preço: '+(p.preco||'—')+'\n';
+    t+='Peça '+(i+1)+': '+_idp+(p.garantia==='Sim'?(' [GARANTIA'+(p.garMotivo?': '+p.garMotivo:'')+']'):'')+' — Molde: '+(p.molde||'—')+' | Fórmula: '+(p.formula||'—')+' | Peso: '+(p.pesoOrc||p.peso||'—')+' | Preço: '+(p.preco||'—')+'\n';
   });
   return t;
 }
@@ -2195,6 +2271,31 @@ function _reparoEnviar(){
   toast('Corrigindo '+lista.length+' registro(s) na planilha…');
   postSheet(SHEET_URL,{action:'lote',itens:lista});
 }
+/* ═══ LEITURA DA PLANILHA: dois caminhos ═════════════════════════════════
+   1º) POST com CORS (action:'ler') — o crachá viaja no CORPO, não aparece em
+       endereço nenhum. É o caminho preferido.
+   2º) JSONP (o de sempre) — usado só se o 1º falhar. Aqui o crachá tem que ir
+       na URL, e fica registrado no histórico de execuções do Apps Script. Não é
+       ideal, mas é melhor do que o app parar de carregar num aparelho.
+
+   A reserva existe porque leitura é a parte historicamente mais frágil deste
+   app (foi ela que já prendeu a tela em "Carregando planilha…"). Nenhuma
+   mudança aqui pode ter só um caminho. */
+function _lerPorPost(){
+  return _tokenLogin().then(function(tk){
+    var corpo={action:'ler'}; if(CHAVE)corpo.k=CHAVE; if(tk)corpo.token=tk;
+    var ctrl=(typeof AbortController!=='undefined')?new AbortController():null;
+    if(ctrl)setTimeout(function(){try{ctrl.abort();}catch(e){}},12000);
+    return fetch(SHEET_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify(corpo),signal:ctrl?ctrl.signal:undefined});
+  }).then(function(r){
+    if(!r||!r.ok)throw new Error('resposta ruim');
+    return r.json();
+  }).then(function(arr){
+    if(!Array.isArray(arr))throw new Error('formato inesperado');
+    return arr;
+  });
+}
 function carregarNuvem(tent){
   if(!SHEET_URL)return;
   tent=tent||0;
@@ -2215,7 +2316,7 @@ function carregarNuvem(tent){
     var lbl=document.getElementById('origemLbl'); if(lbl)lbl.textContent=_origemAtual;
     toast('Sem conexão com a planilha — mostrando deste aparelho');
   }
-  window[cb]=function(arr){_fim=true;_carregandoNuvem=false;clearTimeout(_tmr);try{
+  window[cb]=function(arr){if(_fim)return;_fim=true;_carregandoNuvem=false;clearTimeout(_tmr);try{
       // mescla planilha + aparelho: o registro local (recém-editado) prevalece pelo id
       var cloud=arr||[]; var local=[]; try{local=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){}
       var map={}; cloud.forEach(function(r){if(r&&r.id!=null)map[String(r.id)]=r;});
@@ -2302,18 +2403,70 @@ function carregarNuvem(tent){
     }
     delete window[cb]; const s2=document.getElementById(cb+'_s'); if(s2)s2.remove();};
   const s=document.createElement('script'); s.id=cb+'_s';
-  s.src=SHEET_URL+(SHEET_URL.indexOf('?')<0?'?':'&')+'callback='+cb+'&k='+encodeURIComponent(CHAVE)+'&t='+Date.now();
   // erro e demora seguem o MESMO caminho. Antes eram dois trechos separados, e o
   // do erro não liberava a trava _carregandoNuvem — bastava uma falha para o app
   // nunca mais tentar ler a planilha, ficando preso em "Carregando" para sempre.
   s.onerror=function(){ if(!_fim)_falhou(); };
-  document.body.appendChild(s);
+  /* RESERVA (JSONP) — só é acionada se o caminho novo falhar.
+     Em SEQUÊNCIA, nunca em paralelo: disparar os dois de uma vez dobraria as
+     chamadas ao Apps Script, que é exatamente o que já saturou o script antes e
+     prendeu todo mundo em "Carregando planilha…".
+     O crachá vai em 'tk' — 't' já é o quebra-cache, e reaproveitar o nome
+     apagaria o efeito dele.
+     O src só é definido depois de pegar o crachá, e o <script> só entra na
+     página aí: script sem src não carrega nada, e definir o src depois de
+     inserir faria o navegador buscar duas vezes. */
+  function _reservaJsonp(){
+    _tokenLogin().then(function(tk){
+      if(_fim)return;
+      s.src=SHEET_URL+(SHEET_URL.indexOf('?')<0?'?':'&')+'callback='+cb+'&k='+encodeURIComponent(CHAVE)
+        +(tk?('&tk='+encodeURIComponent(tk)):'')+'&t='+Date.now();
+      document.body.appendChild(s);
+    }).catch(function(){ if(!_fim)_falhou(); });
+  }
+  /* CAMINHO PREFERIDO: POST com CORS, crachá no corpo — nada em endereço. */
+  _lerPorPost().then(function(arr){
+    if(_fim)return;
+    var f=window[cb]; if(typeof f==='function')f(arr);
+  }).catch(function(){
+    // alguns navegadores/proxies barram o POST com CORS no Apps Script
+    console.warn('[Petro] leitura por POST indisponível — usando o caminho antigo');
+    if(!_fim)_reservaJsonp();
+  });
 }
 // quando a internet voltar: recarrega a planilha e sobe o que ficou pendente
 window.addEventListener('online',function(){
   if(!SHEET_URL)return;
   setTimeout(function(){filaEnviar(false);carregarNuvem();},800);
 });
+/* ═══ ATUALIZAÇÃO AUTOMÁTICA DA LISTA — 26/08/2026 ═══════════════════════
+   Queixa da Suzana: "a página não está sincronizando, precisa fechar e abrir".
+
+   Até aqui a tela só era redesenhada quando o Firebase avisava que alguém tinha
+   mexido. Se esse aviso não chega — conexão instável, aba em segundo plano,
+   celular que suspendeu o app, ou o próprio Firebase falhando em silêncio —
+   a tela ficava congelada até alguém recarregar. Depender de um único gatilho
+   era o erro.
+
+   Agora há três: o aviso do Firebase (como antes), um relógio de 90 segundos e
+   a volta do foco (trocar de aba, destravar o celular, voltar para o app).
+
+   Só a LISTA é redesenhada. Formulário aberto e digitação em andamento não são
+   tocados, e o carregarNuvem já tem trava para não empilhar leituras. */
+(function(){
+  if(!SHEET_URL)return;
+  var _ultima=0;
+  function _atualizar(motivo){
+    if(document.hidden)return;                 // aba escondida não precisa gastar chamada
+    var agora=Date.now();
+    if(agora-_ultima<20000)return;             // no máximo uma a cada 20s, venha de onde vier
+    _ultima=agora;
+    try{ carregarNuvem(); }catch(e){ console.warn('[Petro] atualização automática ('+motivo+'):',e); }
+  }
+  setInterval(function(){ _atualizar('relógio'); },90000);
+  document.addEventListener('visibilitychange',function(){ if(!document.hidden)_atualizar('voltou à aba'); });
+  window.addEventListener('focus',function(){ _atualizar('voltou o foco'); });
+})();
 function renderFromArray(arr,origem,acoes){
   LISTA_ATUAL=arr||[]; ACOES_ATUAL=acoes;
   document.getElementById('cnt').textContent=LISTA_ATUAL.length;
@@ -2544,6 +2697,8 @@ function carregarParaEditar(id){
     set('p_qtde',p.qtde);set('p_durmed',p.durmed);set('p_dursol',p.dursol);set('p_peso',p.peso);
     set('p_molde',p.molde);set('p_formula',p.formula);set('p_pesoorc',p.pesoOrc);set('p_preco',p.preco);
     set('p_info',p.info);   // texto livre da peça técnica / desenvolvimento
+    set('p_garmotivo',p.garMotivo);
+    if(p.garantia){const gb=[].slice.call(pe.querySelectorAll('.garseg button')).find(x=>x.dataset.v===p.garantia);if(gb)gb.click();}
     // tipo pode vir como "Outros — manopla": a opção é a parte antes do travessão
     if(p.tipo){
       const _tb=String(p.tipo).split(' — ')[0];
@@ -2623,7 +2778,7 @@ function carregarParaEditar(id){
     // ---- fotos da peça ----
     if(p.fotosPeca&&p.fotosPeca.length){pecasState[pid].fotosPeca=p.fotosPeca.slice();renderPecaFotos(pid);}
     // ---- bloco de orçamento: só aparece na etapa de orçamento (ou se já tem dado preenchido) ----
-    var _temOrc=!!(p.molde||p.formula||p.pesoOrc||p.preco);
+    var _temOrc=!!(p.molde||p.formula||p.pesoOrc||p.preco||p.garantia||p.garMotivo);
     if(d.etapa==='orcamento'||_temOrc){ var ob=pe.querySelector('.orcBlock'); if(ob)ob.classList.remove('hide'); }
   });
   fotos=(d.fotos&&Array.isArray(d.fotos))?d.fotos.slice():[];renderFotos();
@@ -2634,7 +2789,11 @@ function carregarParaEditar(id){
   initSecoes(); modoAdmissao(d.etapa,d.jaEnviado);
   // busca as fotos na nuvem e mostra dentro do formulário (caso este aparelho ainda não tenha)
   if(typeof _comFotosDaNuvem==='function'){ _comFotosDaNuvem(Object.assign({},d,{pecas:(d.pecas||[]).map(function(p){return Object.assign({},p);})}), _reaplicarFotosForm); }
-  window.scrollTo(0,0);toast('Editando — altere e toque em Enviar');
+  /* Só vai para o topo quando a admissão está visível. Com ela escondida
+     (comercial/orçamento), quem manda é o modoAdmissao, que rola até o item 7 —
+     e um scrollTo(0,0) aqui desfaria isso. */
+  if(!(d.jaEnviado&&(d.etapa==='comercial'||d.etapa==='orcamento')))window.scrollTo(0,0);
+  toast('Editando — altere e toque em Enviar');
 }
 // aplica no formulário aberto as fotos vindas da nuvem
 function _reaplicarFotosForm(dd){
@@ -2730,11 +2889,26 @@ function modoAdmissao(etapa,enviado){
   var tg=document.getElementById('admToggle'); if(tg)tg.classList.toggle('hide',!oculta);
   _admAberto=!oculta; _aplicaAdm();
   if(!oculta)return;
-  // se a seção que estava ativa acabou de ser escondida, a tela ficaria vazia:
-  // nesse caso pula para as Peças mesmo fora do desktop
-  var at=document.querySelector('#view-novo > .wrap > .card.ativa');
-  var sumiu=!!at&&at.style.display==='none';
-  if(window.innerWidth>=900||sumiu) irSecao(_idxPecas()); // abre direto nas Peças
+  /* ABRE DIRETO NO ITEM 7 — 26/08/2026
+     Queixa do Fábio: o orçamento pendente abria no item 1 e ele tinha que
+     procurar as peças toda vez.
+
+     A regra antiga só pulava para as Peças em tela larga (>=900px) ou se a
+     seção ativa tivesse sumido. Em janela estreita ou celular — layout linear,
+     sem seção "ativa" — nada acontecia, e o `scrollTo(0,0)` do final da edição
+     ainda jogava a tela para o topo. Como a admissão está escondida aqui, o
+     item 1 nem existe na tela: abrir nele é abrir no vazio.
+
+     Agora vale para qualquer tamanho de tela: ativa a seção das Peças E rola
+     até ela, para o layout linear também obedecer. */
+  irSecao(_idxPecas());
+  setTimeout(function(){
+    try{
+      var pcs=document.getElementById('pecas');
+      var card=pcs&&pcs.closest?pcs.closest('.card'):null;
+      if(card&&card.scrollIntoView)card.scrollIntoView({behavior:'smooth',block:'start'});
+    }catch(e){}
+  },150);
 }
 function initSecoes(){
   buildNav();
@@ -2883,12 +3057,38 @@ function filaEnviar(manual){
       return;
     }
     var it=f[i];
-    fetch(SHEET_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(_comChave(it.obj))})
+    // crachá NOVO para cada item da fila: o que está guardado aqui pode ser de
+    // ontem, e o crachá de ontem já venceu
+    _tokenLogin().then(function(tk){
+      var corpo=_comChave(it.obj); if(tk)corpo.token=tk;
+      return fetch(SHEET_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(corpo)});
+    })
       .then(function(){ok++;})
       .catch(function(){it.tentativas=(it.tentativas||0)+1;falhas.push(it);})
       .then(function(){setTimeout(function(){passo(i+1);},250);});
   }
   passo(0);
+}
+/* ═══ CRACHÁ DO FIREBASE (ID token) ═══════════════════════════════════════
+   É o que prova para o Apps Script que quem está chamando fez login.
+
+   SEMPRE pego na HORA DO ENVIO, nunca guardado junto com a ação. O crachá vale
+   1 hora: uma ação que ficou na fila offline durante a noite subiria com crachá
+   vencido e seria recusada. É o oposto do carimbo de autoria (`quem`), que tem
+   que ser gravado na hora do clique — por isso os dois são tratados separados.
+
+   getIdToken() renova sozinho quando está perto de expirar.
+   Sem login, devolve vazio: enquanto EXIGIR_LOGIN estiver desligado no
+   Apps Script, tudo continua funcionando como antes. */
+function _tokenLogin(){
+  return new Promise(function(resolve){
+    try{
+      if(typeof firebase==='undefined'||!firebase.apps||!firebase.apps.length||!firebase.auth)return resolve('');
+      var u=firebase.auth().currentUser;
+      if(!u)return resolve('');
+      u.getIdToken().then(function(t){resolve(t||'');}).catch(function(){resolve('');});
+    }catch(e){ resolve(''); }
+  });
 }
 function postSheet(url,obj){
   /* CARIMBO DE AUTORIA — 25/08/2026
@@ -2897,11 +3097,14 @@ function postSheet(url,obj){
      quando a fila subir amanhã. Carimbando antes do envio, a cópia guardada na
      fila já sai com o dono certo. */
   try{ if(obj&&!obj.quem&&typeof window._usuarioAtual==='function')obj.quem=window._usuarioAtual(); }catch(e){}
-  return fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(_comChave(obj))})
-    .catch(function(){
-      if(_filaAdd(obj))toast('Sem internet — guardado pra enviar depois');
-      else if(obj&&obj.action==='email')toast('Sem internet — o e-mail não saiu. Tente de novo quando conectar.');
-    });
+  return _tokenLogin().then(function(tk){
+    var corpo=_comChave(obj);
+    if(tk)corpo.token=tk;   // crachá fresco, só nesta requisição — não vai para a fila
+    return fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(corpo)});
+  }).catch(function(){
+    if(_filaAdd(obj))toast('Sem internet — guardado pra enviar depois');
+    else if(obj&&obj.action==='email')toast('Sem internet — o e-mail não saiu. Tente de novo quando conectar.');
+  });
 }
 function enviarPlanilha(d,editando,mudou){
   if(!SHEET_URL)return;
@@ -3287,7 +3490,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
   // ►►► LIGA/DESLIGA do login ◄◄◄
   // Só troque para true DEPOIS de criar as contas no Firebase e publicar as
   // regras novas (ver "[C] PASSO A PASSO - Login individual e log.md").
-  var LOGIN_INDIVIDUAL = false;
+  var LOGIN_INDIVIDUAL = true;
 
   var SESSAO_KEY='petro_sessao';   // {email, dia} — controla a expiração diária
 
