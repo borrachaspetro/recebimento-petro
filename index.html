@@ -571,7 +571,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v39';
+const APP_VERSAO='v41';
 const APP_DATA='25/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -615,7 +615,11 @@ bindChipsSingle('servico','servico','servicoDesc',['Outros'],function(){ aplicar
    volta a aparecer. */
 const _BLOCOS_ESCONDIDOS={
   normal:          ['info'],
-  retifica:        ['info','dursol'],
+  /* Retífica: some a dureza solicitada (a borracha já está no rolo, só se
+     mede a que tem) e some o "com ou sem revestimento" — em retífica a peça
+     SEMPRE chega com borracha, é isso que vai ser retificado. A resposta é
+     preenchida sozinha como C/B em aplicarModoServico. */
+  retifica:        ['info','dursol','rev'],
   tecnica:         ['rev','med','dureza','desenho','acab','acess','tipopeca','insp'],
   desenvolvimento: ['rev','med','espec','dureza','desenho','acab','acess','tipopeca','insp']
 };
@@ -638,9 +642,16 @@ function aplicarModoServico(){
     pe.querySelectorAll('[data-blk]').forEach(function(el){
       el.classList.toggle('hide', esconder.indexOf(el.dataset.blk)>=0);
     });
+    var pid=+pe.id.split('-')[1], st=pecasState[pid];
+    /* RETÍFICA responde sozinha "com revestimento": a pergunta some da tela,
+       mas o dado continua sendo gravado. Sem isto a ficha iria para a planilha
+       com o campo vazio, e a validação travaria num campo que ninguém vê. */
+    if(modo==='retifica'&&st&&st.cb!=='C/B'){
+      var bcb=[].slice.call(pe.querySelectorAll('.cbseg button')).find(function(x){return x.dataset.v==='C/B';});
+      if(bcb)bcb.click();
+    }
     /* As medições "medido" seguem a regra própria do S/B (classe .revmed).
        Reaplico aqui porque o bloco pode ter acabado de reaparecer. */
-    var pid=+pe.id.split('-')[1], st=pecasState[pid];
     if(st&&st.cb)pe.querySelectorAll('.revmed').forEach(function(x){ x.classList.toggle('hide',st.cb==='S/B'); });
   });
   var card=document.getElementById('cardAssinatura');
@@ -1888,7 +1899,7 @@ function confirmarEnviar(){
   var intro=(dest==='orcamento'?'Segue a ficha para orçamento (preencher Molde/Fórmula/Peso/Preço no app):':(dest==='admissao'?'Recebimento devolvido à admissão para corrigir/completar:':(dest==='cliente'?'Segue a confirmação do recebimento do seu material na Borrachas Petro:':'Recebimento para o comercial conferir/completar no app:')));
   fecharEnviar();
   function mandar(dd){
-    var payload={action:'email',to:to,assunto:assunto,resumo:intro+'\n\n'+montarTexto(dd)+(dest==='orcamento'?('\n\n'+_resumoOrc(dd)):'')};
+    var payload={action:'email',id:id,to:to,assunto:assunto,resumo:intro+'\n\n'+montarTexto(dd)+(dest==='orcamento'?('\n\n'+_resumoOrc(dd)):'')};
     if(anexar && window.jspdf && window.jspdf.jsPDF){
       try{ var doc=gerarPDFdoc(dd); payload.mime='application/pdf'; payload.nome=_pdfFileName(dd); payload.arquivo=doc.output('datauristring'); }catch(e){console.error(e);}
     }
@@ -2120,7 +2131,7 @@ function gerarRelatorio(d){
     x.fillText('R 02-1 · App de Recebimento · Borrachas Petro · '+d.criado,W/2,H-20);x.textAlign='left';
     if(SHEET_URL&&EMAIL_COM){
       const b64=cv.toDataURL('image/jpeg',0.85);
-      postSheet(SHEET_URL,{action:'email',to:_emailDaArea('comercial'),assunto:'ADMISSÃO RECEBIDA — '+_tituloFicha(d),resumo:montarTexto(d),arquivo:b64,nome:'Recebimento_'+(d.cliente||'rolo').replace(/\s/g,'_')+'.jpg'});
+      postSheet(SHEET_URL,{action:'email',id:d.id,to:_emailDaArea('comercial'),assunto:'ADMISSÃO RECEBIDA — '+_tituloFicha(d),resumo:montarTexto(d),arquivo:b64,nome:'Recebimento_'+(d.cliente||'rolo').replace(/\s/g,'_')+'.jpg'});
       toast('Enviado por e-mail ao comercial'); return;
     }
     cv.toBlob(blob=>{
@@ -2426,7 +2437,7 @@ function enviarOrcamento(id){
       var nome=_pdfFileName(dd);
       if(SHEET_URL){
         var datauri=doc.output('datauristring');
-        postSheet(SHEET_URL,{action:'email',to:EMAIL_ORC,mime:'application/pdf',nome:nome,
+        postSheet(SHEET_URL,{action:'email',id:id,to:EMAIL_ORC,mime:'application/pdf',nome:nome,
           assunto:'CUSTO PENDENTE — '+_tituloFicha(dd),
           resumo:'Segue a ficha de recebimento para orçamento.\n\n'+montarTexto(dd),
           arquivo:datauri});
@@ -2469,7 +2480,7 @@ function orcamentoPronto(id){
   (LISTA_ATUAL||[]).forEach(function(a){if(String(a.id)===String(id)){a.orcPronto=true;a.orcProntoEm=now;a.etapa='comercial';a.etapaEm=now;a.updatedAt=now;}});
   if(SHEET_URL)postSheet(SHEET_URL,{action:'etapa',id:id,etapa:'comercial'}); // grava a volta na planilha
   if(SHEET_URL&&EMAIL_COM){
-    postSheet(SHEET_URL,{action:'email',to:_emailDaArea('comercial'),
+    postSheet(SHEET_URL,{action:'email',id:id,to:_emailDaArea('comercial'),
       assunto:'CUSTO FINALIZADO — '+_tituloFicha(d),
       resumo:'O orçamento foi preenchido e está pronto para lançar no Naphta:\n\n'+_resumoOrc(d)});
   }
