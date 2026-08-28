@@ -505,7 +505,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v25';
+const APP_VERSAO='v27';
 const APP_DATA='25/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1483,18 +1483,26 @@ function fecharEnviar(){document.getElementById('enviarModal').classList.remove(
 function verPDF(id){
   var d=(LISTA_ATUAL||[]).find(function(a){return String(a.id)===String(id);})||JSON.parse(localStorage.getItem('petro_receb')||'[]').find(function(a){return String(a.id)===String(id);});
   if(!d){toast('Recebimento não encontrado');return;}
+  /* COM OU SEM FOTOS — 26/08/2026, pedido da Suzana.
+     O PDF que se imprime não precisa das fotos (gasta tinta e papel à toa); o
+     que vai por e-mail e fica no app, sim. Por isso a escolha é feita na hora
+     de gerar, e não numa configuração que alguém teria de lembrar de trocar.
+     O PDF anexado ao e-mail (enviarOrcamento e envio da ficha) continua sempre
+     COM fotos — lá elas são a evidência de como a peça chegou. */
+  var _semFotos=!confirm('Incluir as FOTOS neste PDF?\n\nOK  →  com fotos\nCancelar  →  sem fotos (para imprimir)');
   toast('Gerando PDF…');
   _ensureJsPDF(function(){
     var seguir=function(dd){
-      var doc; try{doc=gerarPDFdoc(dd);}catch(e){console.error(e);toast('Erro ao gerar o PDF');return;}
+      var doc; try{doc=gerarPDFdoc(dd,_semFotos);}catch(e){console.error(e);toast('Erro ao gerar o PDF');return;}
       try{
         var blob=doc.output('blob'), url=URL.createObjectURL(blob);
         var w=window.open(url,'_blank');
-        if(!w){ var a=document.createElement('a'); a.href=url; a.download=_pdfFileName(dd); a.click(); }
+        if(!w){ var a=document.createElement('a'); a.href=url; a.download=_pdfFileName(dd,_semFotos); a.click(); }
         setTimeout(function(){URL.revokeObjectURL(url);},60000);
       }catch(e){ toast('Não foi possível abrir o PDF'); }
     };
-    if(typeof _comFotosDaNuvem==='function')_comFotosDaNuvem(Object.assign({},d,{pecas:(d.pecas||[]).map(function(p){return Object.assign({},p);})}),seguir);
+    // sem fotos não precisa buscá-las na nuvem: sai na hora
+    if(!_semFotos&&typeof _comFotosDaNuvem==='function')_comFotosDaNuvem(Object.assign({},d,{pecas:(d.pecas||[]).map(function(p){return Object.assign({},p);})}),seguir);
     else seguir(d);
   });
 }
@@ -1807,10 +1815,13 @@ function _tituloFicha(d){
   var nf=(d.nf&&(''+d.nf).trim())||'sem-NF';
   return (d.cliente||'Cliente')+' - '+(fmtData(d.data)||'')+' - NF '+nf;
 }
-function _pdfFileName(d){
-  return _tituloFicha(d).replace(/[\\/:*?"<>|]/g,'-').replace(/\s+/g,' ').trim()+'.pdf';
+function _pdfFileName(d,semFotos){
+  return _tituloFicha(d).replace(/[\\/:*?"<>|]/g,'-').replace(/\s+/g,' ').trim()
+    +(semFotos?' - sem fotos':'')+'.pdf';   // o nome já diz qual versão é
 }
-function gerarPDFdoc(d){
+/* semFotos = true → gera a versão de impressão, sem a galeria de imagens.
+   Todo o resto (tabela de peças, informações, aceite do cliente) sai igual. */
+function gerarPDFdoc(d,semFotos){
   d=Object.assign({},d); d.fotos=(d.fotos||[]).slice(); // gerais; as demais são agrupadas por tipo no rodapé
   var jsPDF=window.jspdf.jsPDF;
   var doc=new jsPDF({unit:'mm',format:'a4',orientation:'landscape'});
@@ -1962,6 +1973,7 @@ function gerarPDFdoc(d){
     y+=2;
   }
   function drawFotosPDF(){
+    if(semFotos)return;   // versão de impressão: sem galeria
     var pecaFotos=[],ponteiras=[],furos=[],desenhos=[];
     function _fde(x){ return (typeof x==='string')?x:(x&&x.foto)||''; }
     (d.pecas||[]).forEach(function(p){
@@ -2159,13 +2171,34 @@ function wrapText(ctx,text,x0,y0,maxW,lh){const w=(text||'').split(' ');let l=''
 
 // ============ PERSISTÊNCIA ============
 // remove as FOTOS de recebimentos com mais de X dias (mantém os dados; libera espaço do aparelho)
+/* ═══ LIMPEZA DAS FOTOS DO APARELHO — CORRIGIDA EM 26/08/2026 ═══════════
+   Esta função apaga do aparelho as fotos de recebimentos com mais de 30 dias,
+   para não entupir a memória do celular. A ideia é certa: a cópia que dura é a
+   da nuvem.
+
+   O ERRO: ela apagava só pela IDADE, sem nunca conferir se a foto tinha
+   REALMENTE subido. E o envio para a nuvem falha calado quando o pacote de
+   fotos passa de 1 MB (todas as fotos de um recebimento vão num documento só).
+
+   Ou seja, existia este caminho de perda definitiva:
+     recebimento com muitas fotos → envio falha em silêncio → fotos ficam só
+     neste aparelho → passam 30 dias → esta função apaga → acabou.
+
+   Agora só é apagado o que a nuvem CONFIRMOU ter recebido. Se a confirmação
+   não existe — ou se o módulo de fotos ainda nem carregou — nada é apagado.
+   Ocupar memória é problema pequeno; perder foto de recebimento não é. */
 function _limparFotosAntigas(dias){
   dias=dias||30; const limite=Date.now()-dias*864e5;
   let arr; try{arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){return;}
+  var subiu={};
+  try{
+    if(typeof window._fotosSincronizadas!=='function')return;   // sem como confirmar → não apaga nada
+    (window._fotosSincronizadas()||[]).forEach(function(x){ subiu[String(x)]=1; });
+  }catch(e){ return; }
   let mudou=false;
   arr.forEach(d=>{
     const ts=Number(d&&d.id)||0;
-    if(ts&&ts<limite){
+    if(ts&&ts<limite&&subiu[String(d&&d.id)]){
       if(d.fotos&&d.fotos.length){d.fotos=[];mudou=true;}
       (d.pecas||[]).forEach(p=>{
         if(p.desenhoFoto){p.desenhoFoto='';mudou=true;}
@@ -3133,7 +3166,10 @@ try{
 }catch(e){console.warn('menu',e);}
 // mostra a versão no cabeçalho: "R 02-1 · v2"
 try{var _cv=document.getElementById('codVer'); if(_cv)_cv.textContent='R 02-1 · '+APP_VERSAO;}catch(e){}
-_limparFotosAntigas(30);
+/* Roda só depois de o módulo de fotos carregar (fica no fim do arquivo) e ter
+   tempo de tentar subir a fila. Cedo demais, _fotosSincronizadas ainda não
+   existe e a limpeza não apagaria nada — seguro, mas nunca limparia. */
+setTimeout(function(){ try{ _limparFotosAntigas(30); }catch(e){} },20000);
 _pendAtualiza();
 if(SHEET_URL)setTimeout(function(){filaEnviar(false);},2500); // sobe o que ficou pendente de sessões anteriores
 /* Cada passo isolado. O formulário (addPeca) NÃO pode depender de a lista
@@ -3411,6 +3447,9 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
   // ---- Fila de envio das fotos (à prova de falha: retenta até subir p/ todos) ----
   var _fila={};                                   // id -> registro com fotos aguardando subir
   function _syncSet(){ try{ return JSON.parse(localStorage.getItem('petro_fotos_sync')||'[]'); }catch(e){ return []; } }
+  /* A limpeza de 30 dias precisa saber o que já subiu, para não apagar do
+     aparelho foto que a nuvem nunca recebeu. Ver _limparFotosAntigas. */
+  window._fotosSincronizadas=_syncSet;
   function _marcaSync(id){ try{ var s=_syncSet(); if(s.indexOf(String(id))<0){ s.push(String(id)); localStorage.setItem('petro_fotos_sync',JSON.stringify(s)); } }catch(e){} }
   function _subirUm(id){
     var d=_fila[id]; if(!d) return;
