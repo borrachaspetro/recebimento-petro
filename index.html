@@ -465,6 +465,24 @@
   </div>
 </div>
 
+<!-- ═══ VISUALIZADOR DE PDF ═══════════════════════════════════════════════
+     O PDF é mostrado DENTRO do app, com barra própria em cima. Sem isso não
+     haveria onde colocar o botão Imprimir: quando o PDF abre numa aba, quem
+     manda na tela é o visualizador do navegador, e o app não consegue pôr
+     botão nenhum lá. -->
+<div class="modalbg" id="pdfModal">
+  <div class="modal" style="max-width:min(1000px,96vw);width:100%;padding:12px;max-height:94vh;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <b id="pdfTitulo" style="font-size:14px;flex:1;min-width:120px"></b>
+      <button class="btn" onclick="pdfImprimir()" style="background:var(--amarelo);color:#111;font-weight:800;border:0;border-radius:9px;padding:9px 14px;cursor:pointer">🖨 Imprimir</button>
+      <button class="btn" onclick="pdfBaixar()" style="background:#fff;border:1px solid var(--borda);border-radius:9px;padding:9px 14px;font-weight:700;cursor:pointer">⬇ Baixar</button>
+      <button class="x" onclick="fecharPDF()" style="float:none">×</button>
+    </div>
+    <iframe id="pdfFrame" style="flex:1;width:100%;min-height:65vh;border:1px solid var(--borda);border-radius:8px;background:#fff"></iframe>
+    <div class="hint" id="pdfAviso" style="margin-top:6px"></div>
+  </div>
+</div>
+
 <div class="modalbg" id="enviarModal">
   <div class="modal">
     <button class="x" onclick="fecharEnviar()">×</button>
@@ -486,6 +504,9 @@
       <input type="checkbox" id="envAnexo" style="width:auto;margin:0"> Incluir a ficha em PDF (anexo)
     </label>
     <div class="hint" id="envAnexoFixo" style="display:none;color:#8a6d00;margin-top:4px">🔒 No 1º envio o PDF vai sempre anexado.</div>
+    <!-- O PDF do e-mail vai SEMPRE com fotos (decisão da Suzana, 26/08/2026):
+         quem recebe precisa ver como a peça chegou. A escolha com/sem fotos
+         existe só no botão de PDF da lista, para impressão. -->
     <button class="btn btn-prim" style="width:100%;margin-top:14px" onclick="confirmarEnviar()">Enviar por e-mail</button>
   </div>
 </div>
@@ -505,7 +526,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v28';
+const APP_VERSAO='v33';
 const APP_DATA='25/08/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -702,7 +723,7 @@ const SUBLBL={pt:'Ponteira', fc:'Furo de centro'};
 function addPeca(){
   const id=++pecaSeq;
   pecasState[id]={cb:'',tipo:'',visual:{},acab:'',acabSet:new Set(),acessSN:'',acessSet:new Set(),
-    ptSN:'',fcSN:'',pt:[],fc:[],estado:'',desenhoSN:'',desenhoFoto:'',fotosPeca:[],garantia:''};
+    ptSN:'',fcSN:'',pt:[],fc:[],estado:'',desenhoSN:'',desenhoFoto:'',fotosPeca:[],garantia:'',bombeTipo:''};
   const div=document.createElement('div');
   div.className='peca'; div.id='peca-'+id;
   div.innerHTML=`
@@ -798,12 +819,55 @@ function addPeca(){
         <div class="chip achip" data-av="Rebaixo">Rebaixo</div>
         <div class="chip achip" data-av="Ressalto">Ressalto</div>
         <div class="chip achip" data-av="Friso">Friso</div>
+        <!-- 26/08/2026: perfis curvos. São acabamentos irmãos do Bombê,
+             não tipos dele — confirmado com a Suzana. -->
+        <div class="chip achip" data-av="Côncavo">Côncavo</div>
+        <div class="chip achip" data-av="Convexo">Convexo</div>
+        <div class="chip achip" data-av="Carretel">Carretel</div>
         <div class="chip achip" data-av="A confirmar">A confirmar c/ cliente</div>
         <div class="chip achip" data-av="Outros">Outros</div>
       </div>
       <div class="acabmed hide" data-am="Bombê">
         <div class="grp">Bombê</div>
-        <label>Comprimento (mm)</label><input type="text" inputmode="decimal" class="ac_bombe_comp">
+        <!-- "Quanto de bombê", não "espessura": a Suzana recebe a medida de
+             várias formas (às vezes em graus) e converte para milímetros antes
+             de passar para a equipe. Falar em espessura confundiria quem
+             preenche no balcão. -->
+        <label>Quanto de bombê (mm) <span style="color:var(--vermelho)">*</span></label>
+        <input type="text" inputmode="decimal" class="ac_bombe_mm" placeholder="ex.: 2">
+        <div class="grp" style="color:#333">Tipo de bombê <span style="color:var(--vermelho)">*</span></div>
+        <div class="seg bombeseg">
+          <button data-v="Centralizado">Centralizado</button>
+          <button data-v="Dividido em 3 partes">Dividido em 3 partes</button>
+        </div>
+        <!-- Só o dividido tem comprimentos. O centralizado não precisa. -->
+        <div class="bombe3 hide">
+          <div class="grp" style="font-size:12px;color:#8a6d00">Comprimento de cada parte (mm)</div>
+          <div class="row">
+            <div><label>Lado 1</label><input type="text" inputmode="decimal" class="ac_bombe_l1"></div>
+            <div><label>Centro</label><input type="text" inputmode="decimal" class="ac_bombe_centro"></div>
+            <div><label>Lado 2</label><input type="text" inputmode="decimal" class="ac_bombe_l2"></div>
+          </div>
+        </div>
+        <!-- Campo antigo "Comprimento": escondido, nunca apagado. Recebimentos
+             anteriores a 26/08/2026 têm valor aqui, e remover o input faria a
+             próxima edição gravar vazio por cima. -->
+        <input type="text" class="ac_bombe_comp" style="display:none" tabindex="-1" aria-hidden="true">
+      </div>
+      <div class="acabmed hide" data-am="Côncavo">
+        <div class="grp">Côncavo</div>
+        <label>Raio (mm) <span style="color:var(--vermelho)">*</span></label>
+        <input type="text" inputmode="decimal" class="ac_conc_raio">
+      </div>
+      <div class="acabmed hide" data-am="Convexo">
+        <div class="grp">Convexo</div>
+        <label>Raio (mm) <span style="color:var(--vermelho)">*</span></label>
+        <input type="text" inputmode="decimal" class="ac_conv_raio">
+      </div>
+      <div class="acabmed hide" data-am="Carretel">
+        <div class="grp">Carretel</div>
+        <label>Raio (mm)</label>
+        <input type="text" inputmode="decimal" class="ac_carr_raio">
       </div>
       <div class="acabmed hide" data-am="Ressalto">
         <div class="grp">Ressalto</div>
@@ -968,6 +1032,7 @@ function addPeca(){
   `;
   document.getElementById('pecas').appendChild(div);
   div.querySelectorAll('input[inputmode]').forEach(addNAbutton);
+  _naEmTudo(div);   // e nos campos de texto também
 
   div.querySelectorAll('.cbseg button').forEach(b=>{
     b.onclick=()=>{
@@ -975,6 +1040,15 @@ function addPeca(){
       b.classList.add('on'); pecasState[id].cb=b.dataset.v;
       document.getElementById('cbalert-'+id).classList.toggle('hide',b.dataset.v!=='S/B');
       div.querySelectorAll('.revmed').forEach(x=>x.classList.toggle('hide',b.dataset.v==='S/B'));
+    };
+  });
+  // tipo de bombê: só o "dividido em 3" abre os comprimentos das partes
+  div.querySelectorAll('.bombeseg button').forEach(b=>{
+    b.onclick=()=>{
+      div.querySelectorAll('.bombeseg button').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on'); pecasState[id].bombeTipo=b.dataset.v;
+      var cx=div.querySelector('.bombe3');
+      if(cx)cx.classList.toggle('hide',!/Dividido/i.test(b.dataset.v));
     };
   });
   // é garantia? (só no bloco do orçamento)
@@ -1186,6 +1260,32 @@ function desenhoFoto(id,e){const f=e.target.files[0];if(!f){return;}compressImg(
 function desenhoDelFoto(id){pecasState[id].desenhoFoto='';renderDesenho(id);}
 function frisoTipoChange(sel){const box=sel.closest('.acabmed');if(!box)return;const dim=box.querySelector('.frisoDim');if(dim)dim.classList.toggle('hide',sel.value==='Padrão');}
 // botão "NA" ao lado de cada campo numérico (teclado numérico não digita letras)
+/* ═══ O BOTÃO "NA" EM TODOS OS CAMPOS — 26/08/2026 ═════════════════════════
+   Até aqui o NA só existia nos campos de número. Pedido da Suzana: ele precisa
+   estar em tudo, inclusive nos de texto. O exemplo que ela deu diz o motivo —
+   às vezes quem traz a peça é o motoboy, e ele não sabe de quem pegou. Sem o
+   NA, a pessoa fica travada num campo obrigatório que realmente não se aplica,
+   e acaba inventando alguma coisa para conseguir salvar.
+
+   Ficam DE FORA, de propósito:
+     • data (tem calendário próprio, NA não faz sentido);
+     • busca, configuração (⚙️) e login — não são campos da ficha;
+     • e-mail do cliente no envio — ou é um e-mail válido, ou não se manda;
+     • nome de quem assina o desenvolvimento — assinatura com "NA" não vale
+       como aceite, que é justamente o objetivo daquele campo. */
+function _naEmTudo(raiz){
+  var FORA={data:1,busca:1,buscaCliente:1,cfgUrl:1,cfgEmail:1,cfgEmailOrc:1,cfgEmailAdm:1,
+            cfgOperador:1,envEmailCliente:1,lgEmail:1,lgPass:1,assNome:1};
+  (raiz||document).querySelectorAll('input[type="text"], input[type="tel"], input[type="email"], input:not([type]), textarea')
+    .forEach(function(el){
+      if(!el||el.dataset.nab)return;
+      if(el.id&&FORA[el.id])return;
+      if(el.closest&&(el.closest('#loginGate')||el.closest('#cfgModal')||el.closest('#pdfModal')))return;
+      if(el.type==='hidden'||el.readOnly||el.disabled)return;
+      if(el.style&&el.style.display==='none')return;   // campos guardados só por compatibilidade
+      addNAbutton(el);
+    });
+}
 function addNAbutton(inp){
   if(!inp||inp.dataset.nab)return; inp.dataset.nab='1';
   const wrap=document.createElement('div'); wrap.style.cssText='display:flex;gap:6px;align-items:stretch;margin-bottom:13px';
@@ -1238,6 +1338,24 @@ function _frisoTexto(f){
   var d=[]; if(f.larg)d.push('larg '+f.larg+'mm'); if(f.prof)d.push('prof '+f.prof+'mm'); if(f.qtd)d.push('qtd '+f.qtd);
   return f.tipo+(d.length?(' ('+d.join(', ')+')'):'');
 }
+/* Texto legível do bombê, usado na coluna "Bombê" da planilha e no resumo do
+   acabamento. Ex.: "2mm · Dividido em 3 partes (lado 1 300, centro 200, lado 2 300)" */
+function _bombeTexto(b){
+  if(!b)return '';
+  var p=[];
+  if(b.mm)p.push(b.mm+'mm');
+  if(b.tipo){
+    var t=b.tipo;
+    if(/Dividido/i.test(b.tipo)){
+      var d=[];
+      if(b.l1)d.push('lado 1 '+b.l1); if(b.centro)d.push('centro '+b.centro); if(b.l2)d.push('lado 2 '+b.l2);
+      if(d.length)t+=' ('+d.join(', ')+')';
+    }
+    p.push(t);
+  }
+  if(b.comp)p.push('comp '+b.comp+'mm');   // registros anteriores a 26/08/2026
+  return p.join(' · ');
+}
 function coletarPecas(){
   const out=[];
   document.querySelectorAll('.peca').forEach(p=>{
@@ -1255,9 +1373,19 @@ function coletarPecas(){
         acabParts.push('Friso'+(d.length?' ('+d.join(', ')+')':''));
       }
       if(aset.has('Bombê')){
-        const c=g('ac_bombe_comp'); acabDados.bombe={comp:c};
-        acabParts.push('Bombê'+(c?' (comp '+c+'mm)':''));
+        const bmm=g('ac_bombe_mm'), btipo=(pecasState[id].bombeTipo||'');
+        const l1=g('ac_bombe_l1'), lc=g('ac_bombe_centro'), l2=g('ac_bombe_l2');
+        const c=g('ac_bombe_comp');   // legado, só sobrevive
+        acabDados.bombe={mm:bmm,tipo:btipo,l1:l1,centro:lc,l2:l2,comp:c};
+        acabParts.push('Bombê'+(_bombeTexto(acabDados.bombe)?' ('+_bombeTexto(acabDados.bombe)+')':''));
       }
+      // perfis curvos — irmãos do bombê, cada um com seu raio
+      [['Côncavo','concavo','ac_conc_raio'],['Convexo','convexo','ac_conv_raio'],['Carretel','carretel','ac_carr_raio']]
+        .forEach(function(cfg){
+          if(!aset.has(cfg[0]))return;
+          var r=g(cfg[2]); acabDados[cfg[1]]={raio:r};
+          acabParts.push(cfg[0]+(r?' (raio '+r+'mm)':''));
+        });
       if(aset.has('Ressalto')){
         const c=g('ac_ress_comp'),dm=g('ac_ress_diam'); acabDados.ressalto={comp:c,diam:dm};
         const d=[]; if(c)d.push('comp '+c+'mm'); if(dm)d.push('Ø '+dm+'mm');
@@ -1318,7 +1446,15 @@ function coletarPecas(){
          dado passa a ter coluna própria — sem mexer no Code.gs, porque ele já
          grava (gravar_) e já devolve (doGetInterno_: r[26] e r[25]) os dois. */
       frisado:_frisoTexto(acabDados.friso),
-      bombe:(acabDados.bombe&&acabDados.bombe.comp)?('comp '+acabDados.bombe.comp+'mm'):'',
+      bombe:_bombeTexto(acabDados.bombe),
+      /* Perfis curvos numa coluna só ("Côncavo (raio 120mm)"). Coluna própria,
+         e não só dentro do texto do acabamento — foi assim que o tipo de friso
+         se perdeu por semanas (v18). */
+      perfil:['concavo','convexo','carretel'].map(function(k){
+        var v=acabDados[k]; if(!v)return '';
+        var nome={concavo:'Côncavo',convexo:'Convexo',carretel:'Carretel'}[k];
+        return nome+(v.raio?(' (raio '+v.raio+'mm)'):'');
+      }).filter(Boolean).join('; '),
       acessSN:acessSN,acess:acess,acessDados:acessItens,acessOutros:acessOutros,
       peso:g('p_peso'),
       info:g('p_info'),   // texto livre da peça técnica / desenvolvimento
@@ -1389,6 +1525,12 @@ function salvarFicha(enviarDepois){
       if(!st.acabSet||st.acabSet.size===0)erros.push(n+'escolher o tipo de acabamento');
       else{
         if(st.acabSet.has('Friso')){const ft=pe.querySelector('.ac_friso_tipo');if(!ft||!ft.value.trim())erros.push(n+'Friso: escolher o tipo');}
+        if(st.acabSet.has('Bombê')){
+          if(faltou('ac_bombe_mm'))erros.push(n+'Bombê: quantos mm');
+          if(!st.bombeTipo)erros.push(n+'Bombê: centralizado ou dividido em 3');
+        }
+        if(st.acabSet.has('Côncavo')&&faltou('ac_conc_raio'))erros.push(n+'Côncavo: informar o raio');
+        if(st.acabSet.has('Convexo')&&faltou('ac_conv_raio'))erros.push(n+'Convexo: informar o raio');
         if(st.acabSet.has('Outros')&&faltou('p_acaboutros'))erros.push(n+'Acabamento Outros: descrever');
       }
     }
@@ -1480,29 +1622,88 @@ function openEnviar(id){
 }
 function fecharEnviar(){document.getElementById('enviarModal').classList.remove('show');}
 // ver/baixar o PDF do relatório direto da lista (sem abrir a ficha)
-function verPDF(id){
+/* ═══ VISUALIZADOR DE PDF DENTRO DO APP — 26/08/2026 ══════════════════════
+   Pedido da Suzana: o PDF abre na tela COM as fotos, e o botão Imprimir é que
+   pergunta se ela quer com ou sem.
+
+   Isso só é possível mostrando o PDF dentro do app. Abrindo numa aba, quem
+   manda na tela é o visualizador do navegador — não dá para acrescentar botão
+   nenhum lá dentro.
+
+   Também resolve de vez o problema da v26: nada aqui depende de abrir aba
+   nova, então não existe mais bloqueio de pop-up nem download inesperado.
+
+   A pergunta do Imprimir usa confirm() sem problema: imprimir não abre janela,
+   então não gasta o "crédito de clique" que a abertura de aba exige. */
+var _pdfDados=null;          // ficha atual, já com as fotos da nuvem
+var _pdfUrl=null, _pdfNome='';
+
+function _pdfMostrar(dd,semFotos){
+  var doc; try{ doc=gerarPDFdoc(dd,semFotos); }
+  catch(e){ console.error(e); toast('Erro ao gerar o PDF'); return null; }
+  try{
+    if(_pdfUrl)URL.revokeObjectURL(_pdfUrl);
+    _pdfUrl=URL.createObjectURL(doc.output('blob'));
+    _pdfNome=_pdfFileName(dd,semFotos);
+    var fr=document.getElementById('pdfFrame'); if(fr)fr.src=_pdfUrl;
+    var av=document.getElementById('pdfAviso');
+    if(av)av.textContent=semFotos?'Versão SEM fotos — para impressão.':'Versão com fotos.';
+    return doc;
+  }catch(e){ toast('Não foi possível abrir o PDF'); return null; }
+}
+function fecharPDF(){
+  document.getElementById('pdfModal').classList.remove('show');
+  var fr=document.getElementById('pdfFrame'); if(fr)fr.src='about:blank';
+  if(_pdfUrl){ setTimeout(function(){ try{URL.revokeObjectURL(_pdfUrl);}catch(e){} _pdfUrl=null; },500); }
+}
+function pdfBaixar(){
+  if(!_pdfUrl)return;
+  var a=document.createElement('a'); a.href=_pdfUrl; a.download=_pdfNome||'recebimento.pdf'; a.click();
+}
+function pdfImprimir(){
+  if(!_pdfDados){toast('Abra o PDF primeiro');return;}
+  var comFotos=confirm('Imprimir COM as fotos?\n\nOK  →  com fotos\nCancelar  →  sem fotos');
+  if(!comFotos){ if(!_pdfMostrar(_pdfDados,true))return; }
+  // dá um tempo para o visualizador montar a versão nova antes de mandar imprimir
+  toast('Preparando impressão…');
+  setTimeout(function(){
+    var fr=document.getElementById('pdfFrame');
+    try{ fr.contentWindow.focus(); fr.contentWindow.print(); }
+    catch(e){
+      /* Alguns navegadores (celular, principalmente) não deixam imprimir de
+         dentro do quadro. Aí baixa o arquivo para a pessoa imprimir por fora. */
+      toast('Seu navegador não imprime daqui — baixando o arquivo');
+      pdfBaixar();
+    }
+  }, comFotos?400:1200);
+}
+
+function verPDF(id,semFotos){
   var d=(LISTA_ATUAL||[]).find(function(a){return String(a.id)===String(id);})||JSON.parse(localStorage.getItem('petro_receb')||'[]').find(function(a){return String(a.id)===String(id);});
   if(!d){toast('Recebimento não encontrado');return;}
-  /* COM OU SEM FOTOS — 26/08/2026, pedido da Suzana.
-     O PDF que se imprime não precisa das fotos (gasta tinta e papel à toa); o
-     que vai por e-mail e fica no app, sim. Por isso a escolha é feita na hora
-     de gerar, e não numa configuração que alguém teria de lembrar de trocar.
-     O PDF anexado ao e-mail (enviarOrcamento e envio da ficha) continua sempre
-     COM fotos — lá elas são a evidência de como a peça chegou. */
-  var _semFotos=!confirm('Incluir as FOTOS neste PDF?\n\nOK  →  com fotos\nCancelar  →  sem fotos (para imprimir)');
-  toast('Gerando PDF…');
+  /* ═══ ABRE NA TELA, NÃO BAIXA — corrigido em 26/08/2026 ═══════════════════
+     A v26 perguntava com um confirm() antes de gerar, e isso QUEBROU a
+     abertura na tela: o navegador só autoriza abrir aba nova logo após o
+     clique, e o tempo que a pessoa levava lendo a pergunta estourava essa
+     autorização. A aba era bloqueada e o arquivo caía no download.
+
+     Agora a aba é aberta JÁ, no próprio clique, ainda vazia, e o PDF é
+     colocado nela quando fica pronto. E a escolha com/sem fotos virou um
+     segundo botão na lista — cada botão é um clique direto, sem pergunta no
+     meio, então a autorização nunca expira.
+
+     O PDF do E-MAIL continua sempre com fotos. Não passa por aqui. */
+  document.getElementById('pdfTitulo').textContent=_tituloFicha(d);
+  document.getElementById('pdfFrame').src='about:blank';
+  document.getElementById('pdfAviso').textContent='Gerando o PDF…';
+  document.getElementById('pdfModal').classList.add('show');
   _ensureJsPDF(function(){
     var seguir=function(dd){
-      var doc; try{doc=gerarPDFdoc(dd,_semFotos);}catch(e){console.error(e);toast('Erro ao gerar o PDF');return;}
-      try{
-        var blob=doc.output('blob'), url=URL.createObjectURL(blob);
-        var w=window.open(url,'_blank');
-        if(!w){ var a=document.createElement('a'); a.href=url; a.download=_pdfFileName(dd,_semFotos); a.click(); }
-        setTimeout(function(){URL.revokeObjectURL(url);},60000);
-      }catch(e){ toast('Não foi possível abrir o PDF'); }
+      _pdfDados=dd;                 // guardado para o botão Imprimir refazer sem fotos
+      _pdfMostrar(dd,false);        // na tela abre SEMPRE com fotos
     };
-    // sem fotos não precisa buscá-las na nuvem: sai na hora
-    if(!_semFotos&&typeof _comFotosDaNuvem==='function')_comFotosDaNuvem(Object.assign({},d,{pecas:(d.pecas||[]).map(function(p){return Object.assign({},p);})}),seguir);
+    // busca as fotos na nuvem antes de montar
+    if(typeof _comFotosDaNuvem==='function')_comFotosDaNuvem(Object.assign({},d,{pecas:(d.pecas||[]).map(function(p){return Object.assign({},p);})}),seguir);
     else seguir(d);
   });
 }
@@ -2548,7 +2749,7 @@ function filtrarLista(){
       <span class="mini">${d.servico||''} · ${_pcs} · ${fmtData(d.data)}${d.resp?(' · '+d.resp):''}</span></div>
       <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
         <button class="ic" title="Editar" onclick="carregarParaEditar('${d.id}')">✏️</button>
-        <button class="ic" title="Ver PDF do relatório" style="color:#C0392B;font-weight:800;font-size:12px" onclick="verPDF('${d.id}')">PDF</button>
+        <button class="ic" title="Abrir o PDF na tela (com opção de imprimir)" style="color:#C0392B;font-weight:800;font-size:12px" onclick="verPDF('${d.id}')">PDF</button>
         <button class="ic" title="Salvar / sincronizar (sem enviar)" onclick="salvarLinha('${d.id}')">💾</button>
         <button class="ic" title="Enviar por e-mail" style="color:#1F618D;font-weight:800" onclick="openEnviar('${d.id}')">📧</button>
         ${concl?`<button class="ic" title="Reabrir (voltar para pendente)" onclick="reabrir('${d.id}')">↩️</button>`:`<button class="ic icok" title="Concluir (atendido)" onclick="marcarAtendido('${d.id}')">✔️</button>`}
@@ -2643,12 +2844,23 @@ function _acabDoTexto(txt){
     if(/^A confirmar/i.test(s)){ ad.confirmar=true; return; }
     if(/^Outros/i.test(s)){ var pt=s.split('—'); ad.outros=(pt.length>1?pt.slice(1).join('—').trim():''); return; }
     var par=s.match(/\(([^)]*)\)/), dentro=par?par[1]:'';
-    var num=function(rot){ var m=dentro.match(new RegExp(rot+'\\s*([\\d.,]+)','i')); return m?m[1]:''; };
+    /* \d+ com ponto/vírgula NO MEIO apenas: sem o (?=) final, o "300," de
+       "lado 1 300, centro 200" levava a vírgula separadora junto no valor. */
+    var num=function(rot){ var m=dentro.match(new RegExp(rot+'\\s*(\\d+(?:[.,]\\d+)?)','i')); return m?m[1]:''; };
     if(/^Friso/i.test(s)){
       var mt=dentro.match(/tipo\s*([^,]+)/i);
       ad.friso={tipo:mt?mt[1].trim():'',larg:num('larg'),prof:num('prof'),qtd:num('qtd')};
     }
-    else if(/^Bomb/i.test(s))     ad.bombe={comp:num('comp')};
+    else if(/^Bomb/i.test(s)){
+      /* "2mm · Dividido em 3 partes (lado 1 300, centro 200, lado 2 300)" */
+      var mmm=dentro.match(/(\d+(?:[.,]\d+)?)\s*mm/i);
+      var mtp=dentro.match(/(Centralizado|Dividido[^(,]*)/i);
+      ad.bombe={mm:mmm?mmm[1]:'',tipo:mtp?mtp[1].trim():'',
+                l1:num('lado\\s*1'),centro:num('centro'),l2:num('lado\\s*2'),comp:num('comp')};
+    }
+    else if(/^C[ôo]ncavo/i.test(s))  ad.concavo={raio:num('raio')};
+    else if(/^Convexo/i.test(s))     ad.convexo={raio:num('raio')};
+    else if(/^Carretel/i.test(s))    ad.carretel={raio:num('raio')};
     else if(/^Ressalto/i.test(s)) ad.ressalto={comp:num('comp'),diam:num('(?:Ø|diam\\.?)')};
     else if(/^Rebaixo/i.test(s))  ad.rebaixo={comp:num('comp'),diam:num('(?:Ø|diam\\.?)')};
   });
@@ -2665,12 +2877,30 @@ function _acabDeReg(p){
   var fr=_v(p.frisado).trim();
   if(fr){
     var mf=fr.match(/^([^(]*)(?:\(([^)]*)\))?/), dentro=(mf&&mf[2])?mf[2]:'';
-    var n=function(rot){ var x=dentro.match(new RegExp(rot+'\\s*([\\d.,]+)','i')); return x?x[1]:''; };
+    var n=function(rot){ var x=dentro.match(new RegExp(rot+'\\s*(\\d+(?:[.,]\\d+)?)','i')); return x?x[1]:''; };
     var f=ad.friso||{};
     ad.friso={tipo:(mf&&mf[1]?mf[1].trim():'')||f.tipo||'',larg:f.larg||n('larg'),prof:f.prof||n('prof'),qtd:f.qtd||n('qtd')};
   }
   var bo=_v(p.bombe).trim();
-  if(bo){ var mb=bo.match(/([\d.,]+)/); ad.bombe={comp:(ad.bombe&&ad.bombe.comp)||(mb?mb[1]:'')}; }
+  if(bo){
+    var b=ad.bombe||{};
+    var m1=bo.match(/(\d+(?:[.,]\d+)?)\s*mm/i), m2=bo.match(/(Centralizado|Dividido[^(·]*)/i);
+    var nb=function(rot){ var x=bo.match(new RegExp(rot+'\\s*(\\d+(?:[.,]\\d+)?)','i')); return x?x[1]:''; };
+    ad.bombe={mm:b.mm||(m1?m1[1]:''),tipo:b.tipo||(m2?m2[1].trim():''),
+              l1:b.l1||nb('lado\\s*1'),centro:b.centro||nb('centro'),l2:b.l2||nb('lado\\s*2'),
+              comp:b.comp||nb('comp')};
+  }
+  // coluna própria dos perfis curvos: "Côncavo (raio 120mm); Carretel"
+  var pf=_v(p.perfil).trim();
+  if(pf){
+    pf.split(';').forEach(function(t){
+      t=t.trim(); if(!t)return;
+      var mr=t.match(/raio\s*(\d+(?:[.,]\d+)?)/i), raio=mr?mr[1]:'';
+      if(/^C[ôo]ncavo/i.test(t)&&!ad.concavo)ad.concavo={raio:raio};
+      else if(/^Convexo/i.test(t)&&!ad.convexo)ad.convexo={raio:raio};
+      else if(/^Carretel/i.test(t)&&!ad.carretel)ad.carretel={raio:raio};
+    });
+  }
   return ad;
 }
 /* Devolve ao registro os campos ESTRUTURADOS que a planilha não guarda.
@@ -2751,13 +2981,26 @@ function carregarParaEditar(id){
     var ad=_acabDeReg(p)||{}; // aparelho > colunas Frisado/Bombê > texto do acabamento
     let acTipos=[];
     if(ad.friso)acTipos.push('Friso'); if(ad.bombe)acTipos.push('Bombê');
+    if(ad.concavo)acTipos.push('Côncavo'); if(ad.convexo)acTipos.push('Convexo'); if(ad.carretel)acTipos.push('Carretel');
     if(ad.ressalto)acTipos.push('Ressalto'); if(ad.rebaixo)acTipos.push('Rebaixo');
     if(ad.outros!=null&&ad.outros!=='')acTipos.push('Outros');
     if(ad.confirmar)acTipos.push('A confirmar');
-    if(!acTipos.length&&p.acabamento){['Friso','Bombê','Ressalto','Rebaixo','A confirmar','Outros'].forEach(t=>{if(p.acabamento.indexOf(t)>=0)acTipos.push(t);});}
+    if(!acTipos.length&&p.acabamento){['Friso','Bombê','Ressalto','Rebaixo','Côncavo','Convexo','Carretel','A confirmar','Outros'].forEach(t=>{if(p.acabamento.indexOf(t)>=0)acTipos.push(t);});}
     acTipos.forEach(t=>{const c=[].slice.call(pe.querySelectorAll('.achip')).find(x=>x.dataset.av===t);if(c&&!c.classList.contains('on'))c.click();});
     if(ad.friso){set('ac_friso_tipo',ad.friso.tipo);set('ac_friso_larg',ad.friso.larg);set('ac_friso_prof',ad.friso.prof);set('ac_friso_qtd',ad.friso.qtd);const ft=pe.querySelector('.ac_friso_tipo');if(ft)frisoTipoChange(ft);}
-    if(ad.bombe){set('ac_bombe_comp',ad.bombe.comp);}
+    if(ad.bombe){
+      set('ac_bombe_comp',ad.bombe.comp);   // legado
+      set('ac_bombe_mm',ad.bombe.mm);set('ac_bombe_l1',ad.bombe.l1);
+      set('ac_bombe_centro',ad.bombe.centro);set('ac_bombe_l2',ad.bombe.l2);
+      if(ad.bombe.tipo){
+        var bt=[].slice.call(pe.querySelectorAll('.bombeseg button')).find(x=>x.dataset.v===ad.bombe.tipo)
+             ||[].slice.call(pe.querySelectorAll('.bombeseg button')).find(x=>/Dividido/i.test(ad.bombe.tipo)&&/Dividido/i.test(x.dataset.v));
+        if(bt)bt.click();
+      }
+    }
+    if(ad.concavo){set('ac_conc_raio',ad.concavo.raio);}
+    if(ad.convexo){set('ac_conv_raio',ad.convexo.raio);}
+    if(ad.carretel){set('ac_carr_raio',ad.carretel.raio);}
     if(ad.ressalto){set('ac_ress_comp',ad.ressalto.comp);set('ac_ress_diam',ad.ressalto.diam);}
     if(ad.rebaixo){set('ac_reb_comp',ad.rebaixo.comp);set('ac_reb_diam',ad.rebaixo.diam);}
     if(ad.outros!=null){set('p_acaboutros',ad.outros);}
@@ -3177,6 +3420,7 @@ if(SHEET_URL)setTimeout(function(){filaEnviar(false);},2500); // sobe o que fico
    renderSaved() estourava e a execução morria antes do addPeca(). */
 try{ renderSaved(); }catch(e){ console.error('[Petro] init renderSaved:',e); }
 try{ addPeca(); }catch(e){ console.error('[Petro] init addPeca:',e); }
+try{ _naEmTudo(document.getElementById('view-novo')); }catch(e){ console.warn('[Petro] NA:',e); }
 try{ _assIniciar(); _assAtualizaStatus(); }catch(e){ console.warn('[Petro] assinatura:',e); }
 try{ aplicarModoServico(); }catch(e){ console.warn('[Petro] modo do serviço:',e); }
 /* ── REGISTRO DO SERVICE WORKER (app instalável + abrir sem internet) ──
@@ -3560,6 +3804,11 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
   gate.style.cssText='position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;background:#111;padding:20px';
   gate.innerHTML=''+
     '<div style="width:100%;max-width:340px;background:#1b1b1b;border:1px solid #333;border-radius:16px;padding:24px 20px;text-align:center;font-family:inherit">'+
+      /* A logo é a mesma do cabeçalho e do PDF — a constante LOGO, já embutida
+         no arquivo. Não é imagem de fora: aparece igual mesmo sem internet,
+         que é justamente quando esta tela mais precisa dizer de quem ela é.
+         O src é posto por JS, e não aqui, porque a LOGO é um texto gigante. */
+      '<img id="lgLogo" alt="Borrachas Petro" style="width:170px;max-width:72%;height:auto;display:block;margin:0 auto 10px">'+
       '<div style="font-size:15px;font-weight:800;color:#FFCC00;letter-spacing:.5px">BORRACHAS PETRO</div>'+
       '<div style="font-size:13px;color:#ccc;margin:2px 0 18px">Recebimento de Serviços</div>'+
       '<input id="lgEmail" type="email" autocomplete="username" placeholder="Seu e-mail" style="width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:9px;border-radius:9px;border:1px solid #444;background:#111;color:#fff;font-size:15px">'+
@@ -3569,6 +3818,13 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       '<div style="color:#777;font-size:11px;margin-top:6px;line-height:1.5">Cada pessoa entra com a própria senha.<br>A sessão vale até o fim do dia.</div>'+
     '</div>';
   document.body.appendChild(gate);
+
+  // logo do app na tela de login (mesma do cabeçalho e do PDF)
+  try{
+    var _lg=document.getElementById('lgLogo');
+    if(_lg&&typeof LOGO!=='undefined'&&LOGO)_lg.src=LOGO;
+    else if(_lg)_lg.style.display='none';   // sem logo, some o espaço em branco
+  }catch(e){ var _l2=document.getElementById('lgLogo'); if(_l2)_l2.style.display='none'; }
 
   var elEmail=document.getElementById('lgEmail');
   var ultimo=_sessaoLer(); if(ultimo&&ultimo.email)elEmail.value=ultimo.email; // facilita: lembra o e-mail, nunca a senha
