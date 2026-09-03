@@ -323,6 +323,26 @@
         </div>
       </div>
       <div id="embOrcMsg" class="hide" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#FDEBD0;color:#B9500F;font-weight:700;font-size:13px">⚠️ Necessário incluir no orçamento</div>
+
+      <!-- ═══ CAIXA A FABRICAR E MADEIRA A COMPRAR — 03/09/2026 ══════════════
+           Aparece quando a peça chega A GRANEL (sem embalagem nenhuma) ou
+           quando alguém respondeu "Sim" em "Orçar nova caixa?".
+           Nos dois casos vai ser preciso FAZER uma caixa, e quem faz precisa
+           saber duas coisas que hoje ninguém anotava: o tamanho da caixa e a
+           madeira a comprar. Sem isso o orçamento sai por estimativa e a
+           compra vira uma segunda conversa por telefone. -->
+      <div id="embMadBox" class="hide" style="margin-top:12px;border-top:1px dashed #e0d9c0;padding-top:12px">
+        <div class="grp" style="color:#333">Medidas da caixa a fabricar (mm)</div>
+        <div class="row">
+          <div><label>Comprimento</label><input type="text" inputmode="decimal" id="cxComp"></div>
+          <div><label>Largura</label><input type="text" inputmode="decimal" id="cxLarg"></div>
+          <div><label>Altura</label><input type="text" inputmode="decimal" id="cxAlt"></div>
+        </div>
+        <div class="grp" style="color:#333;margin-top:12px">Madeira a comprar</div>
+        <div class="hint" style="margin-top:0">Uma linha por tipo de peça de madeira. Ex.: pinus, 20 × 100 × 2000, 6 peças.</div>
+        <div id="madList"></div>
+        <button type="button" class="addsub" onclick="madAdd()">＋ Adicionar madeira</button>
+      </div>
     </div>
   </div>
 
@@ -338,11 +358,17 @@
         <div class="chip" data-v="Revestimentos diversos">Revest. diversos</div>
         <div class="chip" data-v="Desenvolvimento">Desenvolvimento</div>
         <div class="chip" data-v="Outros">Outros</div>
+        <!-- SEM INFORMAÇÃO — 03/09/2026. Existe porque acontece de verdade:
+             o motoboy deixa a peça e não sabe dizer o que é para fazer. Antes
+             disso, quem recebia era obrigado a escolher um serviço qualquer
+             para conseguir salvar — e o chute virava verdade na planilha. -->
+        <div class="chip" data-v="Sem informação">Sem informação</div>
       </div>
       <input type="text" id="servicoDesc" class="desc hide" placeholder="Descrever outros…">
       <!-- A escolha aqui MUDA o formulário das peças (item 7). Ver aplicarModoServico(). -->
       <div id="servicoDica" class="hint hide" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#FCF3CF;color:#8a6d00;font-weight:600"></div>
 
+      <div id="confcliBox">
       <label>Confirmou o serviço com o cliente? <span class="req">*</span></label>
       <div class="seg" id="confcli">
         <button data-v="Sim">Sim, confirmado</button>
@@ -352,6 +378,7 @@
         <b>⚠️ Confirme antes de orçar.</b>
         Já houve orçamento errado por não confirmar o que o cliente queria (rolo novo × só retífica). Confirme o escopo antes de seguir.
       </div>
+      </div><!-- /confcliBox -->
     </div>
   </div>
 
@@ -571,8 +598,8 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v41';
-const APP_DATA='25/08/2026';
+const APP_VERSAO='v42';
+const APP_DATA='03/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
 let SHEET_URL=localStorage.getItem('petro_sheetUrl')||SHEET_URL_PADRAO;
@@ -620,16 +647,22 @@ const _BLOCOS_ESCONDIDOS={
      SEMPRE chega com borracha, é isso que vai ser retificado. A resposta é
      preenchida sozinha como C/B em aplicarModoServico. */
   retifica:        ['info','dursol','rev'],
+  /* Sem informação: mostra o formulário inteiro. Não se sabe o que é o
+     serviço, então não dá para esconder nada — quem recebe preenche o que
+     consegue medir e marca NA no resto. */
+  seminfo:         ['info'],
   tecnica:         ['rev','med','dureza','desenho','acab','acess','tipopeca','insp'],
   desenvolvimento: ['rev','med','espec','dureza','desenho','acab','acess','tipopeca','insp']
 };
 const _DICA_SERVICO={
   retifica:'Retífica: só a dureza medida. A solicitada não se aplica.',
   tecnica:'Peça técnica: descreva no campo Informações. Preencha também produto, quantidade e fotos.',
-  desenvolvimento:'Desenvolvimento: anote tudo o que o cliente passar e peça a assinatura dele no item 10.'
+  desenvolvimento:'Desenvolvimento: anote tudo o que o cliente passar e peça a assinatura dele no item 10.',
+  seminfo:'Sem informação: registre a peça como ela chegou, com fotos. O comercial define o serviço depois — e é ele que vai confirmar com o cliente.'
 };
 function _modoServico(){
   var s=sel.servico||'';
+  if(s==='Sem informação')return 'seminfo';
   if(s==='Retífica em rolo')return 'retifica';
   if(s==='Peça técnica em borracha')return 'tecnica';
   if(s==='Desenvolvimento')return 'desenvolvimento';
@@ -656,6 +689,22 @@ function aplicarModoServico(){
   });
   var card=document.getElementById('cardAssinatura');
   if(card)card.classList.toggle('hide', modo!=='desenvolvimento');
+  /* Sem informação → não faz sentido perguntar se o serviço foi confirmado
+     com o cliente: não há serviço nenhum para confirmar. A pergunta some e a
+     resposta fica "Ainda não", que é a verdade. Quando o comercial escolher o
+     serviço, a pergunta reaparece para ele — que é quem fala com o cliente. */
+  var cbox=document.getElementById('confcliBox');
+  if(cbox)cbox.classList.toggle('hide', modo==='seminfo');
+  if(modo==='seminfo'&&sel.confcli!=='Não'){
+    var bn=[].slice.call(document.querySelectorAll('#confcli button')).find(function(x){return x.dataset.v==='Não';});
+    if(bn)bn.click();
+  }
+  /* O alerta "confirme antes de orçar" era ligado só pelo clique no botão.
+     Quem saía de "Sem informação" para um serviço de verdade ficava com
+     confcli='Não' e NENHUM aviso na tela — justamente a ficha que mais
+     precisa dele. Agora o aviso segue o estado, não o clique. */
+  var al=document.getElementById('alertaConf');
+  if(al)al.style.display=(modo!=='seminfo'&&sel.confcli==='Não')?'block':'none';
   var dica=document.getElementById('servicoDica');
   if(dica){ var t=_DICA_SERVICO[modo]||''; dica.textContent=t; dica.classList.toggle('hide',!t); }
   if(typeof initSecoes==='function'){ try{ initSecoes(); }catch(e){} }
@@ -730,8 +779,70 @@ document.querySelectorAll('#embTipo .chip').forEach(c=>{
     c.classList.toggle('on');
     if(c.classList.contains('on'))embTipoSel.add(c.dataset.v);else embTipoSel.delete(c.dataset.v);
     document.getElementById('embTipoDesc').classList.toggle('hide',!embTipoSel.has('Outros'));
+    _updEmbMad();
   };
 });
+
+/* ═══ CAIXA A FABRICAR E MADEIRA A COMPRAR — 03/09/2026 ═════════════════════
+   Quando aparece: peça a granel (chegou sem embalagem) ou "Orçar nova caixa?
+   = Sim". Nos dois casos alguém vai ter que fabricar a caixa.
+   Os campos são opcionais de propósito: na admissão às vezes não dá para
+   medir na hora, e o comercial completa depois. Travar aqui só faria a
+   pessoa inventar número para conseguir salvar. */
+let madeiras=[];
+function _precisaCaixa(){ return embTipoSel.has('A granel') || sel.embNovaCaixa==='Sim'; }
+function _updEmbMad(){
+  var b=document.getElementById('embMadBox'); if(!b)return;
+  var mostra=_precisaCaixa();
+  b.classList.toggle('hide',!mostra);
+  if(mostra&&!madeiras.length)madAdd();
+}
+function madAdd(){ madeiras.push({tipo:'',esp:'',larg:'',comp:'',qtd:''}); renderMadeiras(); }
+function madRm(i){ madeiras.splice(i,1); if(!madeiras.length)madeiras.push({tipo:'',esp:'',larg:'',comp:'',qtd:''}); renderMadeiras(); }
+function madSet(i,k,v){ if(madeiras[i])madeiras[i][k]=v; }
+function renderMadeiras(){
+  var box=document.getElementById('madList'); if(!box)return;
+  var esc=function(s){ return String(s==null?'':s).replace(/"/g,'&quot;'); };
+  box.innerHTML=madeiras.map(function(m,i){
+    return '<div style="border:1px solid #e6e0cc;border-radius:10px;padding:10px;margin-bottom:8px;background:#fffdf6">'
+      +'<div class="row"><div><label>Tipo de madeira</label>'
+      +'<input type="text" placeholder="Ex.: pinus, compensado…" value="'+esc(m.tipo)+'" oninput="madSet('+i+',\'tipo\',this.value)"></div>'
+      +'<div style="flex:0 0 90px"><label>Quantidade</label>'
+      +'<input type="text" inputmode="numeric" value="'+esc(m.qtd)+'" oninput="madSet('+i+',\'qtd\',this.value)"></div></div>'
+      +'<div class="row" style="margin-top:8px">'
+      +'<div><label>Espessura (mm)</label><input type="text" inputmode="decimal" value="'+esc(m.esp)+'" oninput="madSet('+i+',\'esp\',this.value)"></div>'
+      +'<div><label>Largura (mm)</label><input type="text" inputmode="decimal" value="'+esc(m.larg)+'" oninput="madSet('+i+',\'larg\',this.value)"></div>'
+      +'<div><label>Comprimento (mm)</label><input type="text" inputmode="decimal" value="'+esc(m.comp)+'" oninput="madSet('+i+',\'comp\',this.value)"></div>'
+      +'</div>'
+      +(madeiras.length>1?'<button type="button" onclick="madRm('+i+')" style="margin-top:8px;background:none;border:none;color:#C0392B;font-weight:700;font-size:12px;cursor:pointer;padding:0">✕ remover esta linha</button>':'')
+      +'</div>';
+  }).join('');
+}
+/* Vira texto de uma linha para a planilha e o PDF.
+   Formato: "pinus 20×100×2000 — 6 un; compensado 15×500×1000 — 2 un" */
+function _madeiraTexto(){
+  return madeiras.filter(function(m){ return m.tipo||m.esp||m.larg||m.comp||m.qtd; })
+    .map(function(m){
+      var med=[m.esp,m.larg,m.comp].filter(Boolean).join('×');
+      return [(m.tipo||'—'),med,(m.qtd?m.qtd+' un':'')].filter(Boolean).join(' ');
+    }).join('; ');
+}
+/* Caminho de volta: lê o texto da planilha e remonta as linhas na tela.
+   Sem isto, o comercial abriria a ficha e veria a madeira em branco — o mesmo
+   buraco do friso (v18) e do produto (v21). */
+function _madeiraDeTexto(t){
+  madeiras=[];
+  String(t||'').split(';').forEach(function(p){
+    p=p.trim(); if(!p)return;
+    var qtd=''; var mq=p.match(/(\d+)\s*un\s*$/i); if(mq){ qtd=mq[1]; p=p.slice(0,mq.index).trim(); }
+    var esp='',larg='',comp='';
+    var mm=p.match(/([\d.,]+)\s*[×x]\s*([\d.,]+)\s*[×x]\s*([\d.,]+)\s*$/);
+    if(mm){ esp=mm[1]; larg=mm[2]; comp=mm[3]; p=p.slice(0,mm.index).trim(); }
+    madeiras.push({tipo:p.replace(/[—-]\s*$/,'').trim(),esp:esp,larg:larg,comp:comp,qtd:qtd});
+  });
+  if(!madeiras.length)madeiras.push({tipo:'',esp:'',larg:'',comp:'',qtd:''});
+  renderMadeiras();
+}
 
 // ---- segmentos ----
 function bindSeg(id,key,descId,descTrigger,after){
@@ -747,7 +858,7 @@ function bindSeg(id,key,descId,descTrigger,after){
 bindSeg('nfdiv','nfdiv','nfdivBox','Sim');
 bindSeg('embCond','embCond',null,null,onEmbCond);
 bindSeg('embConserto','embConserto',null,null,()=>_updEmbOrcMsg());
-bindSeg('embNovaCaixa','embNovaCaixa',null,null,()=>_updEmbOrcMsg());
+bindSeg('embNovaCaixa','embNovaCaixa',null,null,()=>{_updEmbOrcMsg();_updEmbMad();});
 bindSeg('confcli','confcli',null,null,(v)=>{document.getElementById('alertaConf').style.display=(v==='Não')?'block':'none';});
 function _clearSeg(id){document.querySelectorAll('#'+id+' button').forEach(b=>b.classList.remove('on'));}
 function _updEmbOrcMsg(){document.getElementById('embOrcMsg').classList.toggle('hide',!(sel.embConserto==='Sim'||sel.embNovaCaixa==='Sim'));}
@@ -756,7 +867,7 @@ function onEmbCond(v){
   document.getElementById('embCaixaBox').classList.toggle('hide',!(v==='Danificada'||v==='Não possui'));
   if(v!=='Danificada'){ sel.embConserto=''; _clearSeg('embConserto'); }
   if(v==='Boa'){ sel.embNovaCaixa=''; _clearSeg('embNovaCaixa'); }
-  _updEmbOrcMsg();
+  _updEmbOrcMsg(); _updEmbMad();
 }
 function toggleSemNota(){
   var chk=document.getElementById('nfSemNota'), nf=document.getElementById('nf'), wrap=document.getElementById('nfDivWrap');
@@ -779,7 +890,7 @@ const SUBLBL={pt:'Ponteira', fc:'Furo de centro'};
 function addPeca(){
   const id=++pecaSeq;
   pecasState[id]={cb:'',tipo:'',visual:{},acab:'',acabSet:new Set(),acessSN:'',acessSet:new Set(),
-    ptSN:'',fcSN:'',pt:[],fc:[],estado:'',desenhoSN:'',desenhoFoto:'',fotosPeca:[],garantia:'',bombeTipo:''};
+    ptSN:'',fcSN:'',ptCons:'',fcCons:'',pt:[],fc:[],estado:'',desenhoSN:'',desenhoFoto:'',fotosPeca:[],garantia:'',bombeTipo:''};
   const div=document.createElement('div');
   div.className='peca'; div.id='peca-'+id;
   div.innerHTML=`
@@ -1029,7 +1140,19 @@ function addPeca(){
       <button data-v="Conforme">Conforme</button>
       <button data-v="Não conforme">Não conforme</button>
     </div>
-    <div class="consMsg hide" id="ptCons-${id}" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#FDE2E1;color:#C0392B;font-weight:700;font-size:13px">⚠️ Precisa conserto</div>
+    <!-- ═══ PRECISA CONSERTO? — 03/09/2026 ═══════════════════════════════
+         Antes aqui havia um aviso fixo: "⚠️ Precisa conserto". Estava errado.
+         O defeito e o conserto são duas coisas diferentes — ponteira gasta a
+         gente registra, mas nem sempre vai consertar. O aviso decidia sozinho
+         e, quando não era o caso, quem lia a ficha achava que ia entrar
+         serviço que ninguém tinha pedido. Agora quem recebe responde. -->
+    <div class="hide" id="ptCons-${id}" style="margin-top:8px">
+      <div class="grp" style="color:#C0392B">Precisa conserto da ponteira?</div>
+      <div class="seg consseg" data-pid="${id}" data-kind="pt">
+        <button data-v="Sim">Sim, orçar</button>
+        <button data-v="Não">Não, só registrar</button>
+      </div>
+    </div>
     <div class="ptBox hide" id="ptBox-${id}">
       <div class="grp" style="font-size:12px;color:#8a6d00">📷 Fotos das ponteiras (obrigatório) — uma de cada extremidade</div>
       <div class="ptList" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start"></div>
@@ -1041,7 +1164,13 @@ function addPeca(){
       <button data-v="Conforme">Conforme</button>
       <button data-v="Não conforme">Não conforme</button>
     </div>
-    <div class="consMsg hide" id="fcCons-${id}" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#FDE2E1;color:#C0392B;font-weight:700;font-size:13px">⚠️ Precisa conserto</div>
+    <div class="hide" id="fcCons-${id}" style="margin-top:8px">
+      <div class="grp" style="color:#C0392B">Precisa conserto do furo de centro?</div>
+      <div class="seg consseg" data-pid="${id}" data-kind="fc">
+        <button data-v="Sim">Sim, orçar</button>
+        <button data-v="Não">Não, só registrar</button>
+      </div>
+    </div>
     <div class="fcBox hide" id="fcBox-${id}">
       <div class="grp" style="font-size:12px;color:#8a6d00">📷 Fotos do furo de centro</div>
       <div class="fcList" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start"></div>
@@ -1153,10 +1282,29 @@ function addPeca(){
         const nc=(b.dataset.v==='Não conforme');
         b.classList.add('on'); b.classList.add(nc?'bad':'ok');
         pecasState[id][cfg[1]+'SN']=b.dataset.v;
-        document.getElementById(cfg[3]+'-'+id).classList.toggle('hide',!nc); // "precisa conserto" só se não conforme
+        document.getElementById(cfg[3]+'-'+id).classList.toggle('hide',!nc); // pergunta do conserto só se não conforme
         document.getElementById(cfg[2]+'-'+id).classList.remove('hide');      // caixa de fotos sempre visível ao escolher
+        /* Voltou para Conforme: a resposta do conserto tem que ir junto. Sem
+           isto ficaria gravado "precisa conserto: Sim" numa peça marcada como
+           conforme — contradição que só apareceria no orçamento. */
+        if(!nc){
+          pecasState[id][cfg[1]+'Cons']='';
+          var cx=document.getElementById(cfg[3]+'-'+id);
+          if(cx)cx.querySelectorAll('button').forEach(x=>x.classList.remove('on','ok','bad'));
+        }
         if((pecasState[id][cfg[1]]||[]).length===0)pecasState[id][cfg[1]].push({q:'',foto:''}); // já deixa 1 registro p/ foto
         renderSubList(id,cfg[1]);
+      };
+    });
+  });
+  // precisa conserto? (só aparece quando o item foi marcado Não conforme)
+  div.querySelectorAll('.consseg').forEach(seg=>{
+    seg.querySelectorAll('button').forEach(b=>{
+      b.onclick=()=>{
+        seg.querySelectorAll('button').forEach(x=>x.classList.remove('on','ok','bad'));
+        b.classList.add('on'); b.classList.add(b.dataset.v==='Sim'?'bad':'ok');
+        pecasState[id][seg.dataset.kind+'Cons']=b.dataset.v;
+        _resumoPeca(div);
       };
     });
   });
@@ -1419,7 +1567,7 @@ document.addEventListener('keydown',function(e){
    discordarem sobre qual é a "próxima". */
 function _fotosDoRecebimento(){
   var itens=[];
-  (fotos||[]).forEach(function(f){ if(f)itens.push({src:f,rot:'Extra'}); });
+  (fotos||[]).forEach(function(f){ if(f)itens.push({src:f,rot:'Geral (item 8)'}); });
   document.querySelectorAll('.peca').forEach(function(pe,idx){
     var st=pecasState[+pe.id.split('-')[1]]; if(!st)return;
     var n='Peça '+(idx+1);
@@ -1563,8 +1711,21 @@ function coletarPecas(){
     const fcArr=(fcSN)?(st.fc||[]).map(x=>({q:x.q||'',obs:x.obs||'',foto:x.foto||''})):[];
     const estado=st.estado||'';
     const _dlbl=x=>((x.q==='Outros'&&x.obs)?x.obs:(x.q||'—'));
-    const ptResumo = ptSN==='Não conforme' ? ('Não conforme — precisa conserto'+(ptArr.length?(' ('+ptArr.map(_dlbl).join(', ')+')'):'')) : (ptSN||'');
-    const fcResumo = fcSN==='Não conforme' ? ('Não conforme — precisa conserto'+(fcArr.length?(' ('+fcArr.map(_dlbl).join(', ')+')'):'')) : (fcSN||'');
+    /* O resumo passa a dizer as DUAS coisas: qual é o defeito e se vai
+       consertar. Vai inteiro numa coluna só ("Ponteira"/"Furo centro") — é o
+       texto que o comercial e o orçamento leem. Recebimento antigo, gravado
+       antes de 03/09/2026, não tem a resposta e continua lendo igual. */
+    const _resumo=(sn,arr,cons)=>{
+      if(sn!=='Não conforme')return sn||'';
+      var t='Não conforme';
+      if(arr.length)t+=' ('+arr.map(_dlbl).join(', ')+')';
+      if(cons==='Sim')t+=' — precisa conserto';
+      else if(cons==='Não')t+=' — sem conserto, só registro';
+      return t;
+    };
+    const ptCons=st.ptCons||'', fcCons=st.fcCons||'';
+    const ptResumo=_resumo(ptSN,ptArr,ptCons);
+    const fcResumo=_resumo(fcSN,fcArr,fcCons);
     // "Outros — manopla": mesmo padrão do transporte, embalagem e serviço, para
     // caber na coluna "Tipo peça" que já existe, sem precisar de coluna nova.
     var _tp=pecasState[id].tipo||'';
@@ -1601,6 +1762,7 @@ function coletarPecas(){
       molde:g('p_molde'),formula:g('p_formula'),pesoOrc:g('p_pesoorc'),preco:g('p_preco'),
       desenhoSN:st.desenhoSN||'',desenhoFoto:st.desenhoFoto||'',fotosPeca:(st.fotosPeca||[]).slice(),
       ponteiraSN:ptSN,ponteiras:ptArr,furoSN:fcSN,furos:fcArr,estado:estado,
+      ponteiraCons:ptCons,furoCons:fcCons,
       visual:{ponteira:ptResumo,furo:fcResumo,estado:estado}
     });
   });
@@ -1686,9 +1848,15 @@ function salvarFicha(enviarDepois){
       else{
         if(!editId && !(st.pt&&st.pt.some(x=>x.foto)))erros.push(n+'Foto da ponteira (obrigatória)');
         if(st.ptSN==='Não conforme'&&st.pt) st.pt.forEach((x,i)=>{if(!x.q)erros.push(n+'classificar o defeito da ponteira '+(i+1));});
+        /* Registrar o defeito sem dizer se conserta deixa a decisão no ar até
+           o orçamento — que foi exatamente o que ela pediu para resolver. */
+        if(st.ptSN==='Não conforme'&&!st.ptCons)erros.push(n+'Precisa conserto da ponteira? (Sim/Não)');
       }
       if(!st.fcSN)erros.push(n+'Furo de centro (Conforme/Não conforme)');
-      else if(st.fcSN==='Não conforme'&&st.fc) st.fc.forEach((x,i)=>{if(!x.q)erros.push(n+'classificar o defeito do furo '+(i+1));});
+      else if(st.fcSN==='Não conforme'){
+        if(st.fc) st.fc.forEach((x,i)=>{if(!x.q)erros.push(n+'classificar o defeito do furo '+(i+1));});
+        if(!st.fcCons)erros.push(n+'Precisa conserto do furo de centro? (Sim/Não)');
+      }
     }
     if(!st.estado)erros.push(n+'Estado geral');
     if(!editId && !(st.fotosPeca&&st.fotosPeca.length))erros.push(n+'Foto da peça (obrigatória)'); // obrigatório só em recebimentos novos
@@ -1933,7 +2101,8 @@ function _regAnterior(id){
 }
 const _ROTULOS={resp:'Responsável',data:'Data',cliente:'Cliente',contato:'Contato',fone:'Fone',
   transp:'Transporte',nf:'NF',nfdiv:'Divergências NF',embTipo:'Embalagem',embCond:'Condições emb.',
-  embConserto:'Orçar conserto',embNovaCaixa:'Orçar nova caixa',servico:'Serviço',
+  embConserto:'Orçar conserto',embNovaCaixa:'Orçar nova caixa',
+  caixaMed:'Medidas da caixa',madeira:'Madeira a comprar',servico:'Serviço',
   confcli:'Confirmado c/ cliente',obs:'Observações'};
 const _ROTULOS_PECA={cb:'C/B ou S/B',tipo:'Tipo de peça',produto:'Produto',qtde:'Qtde',
   dint:'Ø int ferro',dextsol:'Ø ext sol',dextmed:'Ø ext med',areautil:'Comp área útil',
@@ -1988,6 +2157,11 @@ function coletar(pecas){
     nfQtdeNota:val('nfQtdeNota'),nfQtdeReceb:val('nfQtdeReceb'),
     embTipo:[...embTipoSel].map(t=>t==='Outros'?('Outros — '+val('embTipoDesc')):t).join(', '),
     embCond:sel.embCond,embConserto:sel.embConserto,embNovaCaixa:sel.embNovaCaixa,
+    /* Caixa a fabricar: as três medidas viram UM campo só ("1200 × 400 × 300"),
+       porque três colunas novas na planilha para um caso que é minoria só
+       atrapalharia a leitura. O app volta a separar na hora de editar. */
+    caixaMed:[val('cxComp'),val('cxLarg'),val('cxAlt')].filter(Boolean).join(' × '),
+    madeira:_madeiraTexto(),
     servico:sel.servico+(sel.servico==='Outros'?(' — '+val('servicoDesc')):''),confcli:sel.confcli,
     /* ASSINATURA DO CLIENTE (Desenvolvimento)
        A imagem viaja junto com as FOTOS (documento próprio no Firebase), nunca
@@ -2198,10 +2372,13 @@ function gerarPDFdoc(d,semFotos){
     var recRows=[['Transporte',d.transp],['Nº NF',d.nf],['Divergências NF',divTxt],['Embalagem',d.embTipo||'—'],['Condições',d.embCond]];
     if(d.embCond==='Danificada')recRows.push(['Orçar conserto',d.embConserto||'—']);
     if(d.embCond==='Danificada'||d.embCond==='Não possui')recRows.push(['Orçar nova caixa',d.embNovaCaixa||'—']);
+    if(d.caixaMed)recRows.push(['Caixa a fabricar (mm)',d.caixaMed]);
+    if(d.madeira)recRows.push(['Madeira a comprar',d.madeira]);
     var blocos=[
       ['DADOS DO CLIENTE',[['Cliente',d.cliente],['Data',fmtData(d.data)],['Responsável',d.resp],['Contato',d.contato],['Fone',d.fone]]],
       ['RECEBIMENTO',recRows],
-      ['SERVIÇO',[['Serviço',d.servico],['Confirmado c/ cliente',d.confcli==='Sim'?'Sim':'AINDA NÃO']]]
+      ['SERVIÇO',[['Serviço',d.servico],['Confirmado c/ cliente',
+        d.servico==='Sem informação'?'A DEFINIR':(d.confcli==='Sim'?'Sim':'AINDA NÃO')]]]
     ];
     blocos.forEach(function(bl,ci){
       var x=x0+ci*colW, yy=yTop;
@@ -2528,11 +2705,19 @@ function montarTexto(d){
   let t='*RECEBIMENTO DE SERVIÇO — Borrachas Petro (R 02-1)*\n';
   t+='Cliente: '+d.cliente+'\n';
   if(d.nf)t+='NF: '+d.nf+'\n';
-  t+='Serviço: '+d.servico+(d.confcli==='Sim'?' (confirmado)':' ⚠️ NÃO confirmado')+'\n';
+  /* "Sem informação" já diz tudo: repetir "NÃO confirmado" só faria o aviso
+     perder força justamente onde ele importa — no serviço que alguém definiu
+     e esqueceu de confirmar. */
+  t+='Serviço: '+d.servico+(d.servico==='Sem informação'?' — definir com o cliente'
+      :(d.confcli==='Sim'?' (confirmado)':' ⚠️ NÃO confirmado'))+'\n';
   t+='Peças: '+d.pecas.length+' ('+d.pecas.map(p=>p.cb==='S/B'?'Sem revest.':'Com revest.').join(', ')+')\n';
   if(d.embCond==='Danificada'||d.embCond==='Não possui'){
     if(d.embConserto==='Sim')t+='Orçar conserto da embalagem: Sim (incluir no orçamento)\n';
     if(d.embNovaCaixa==='Sim')t+='Orçar nova caixa: Sim (incluir no orçamento)\n';
+  }
+  if(d.caixaMed||d.madeira){
+    if(d.caixaMed)t+='Caixa a fabricar (mm): '+d.caixaMed+'\n';
+    if(d.madeira)t+='Madeira a comprar: '+d.madeira+'\n';
   }
   t+='Recebido por: '+d.resp+' · '+fmtData(d.data);
   return t;
@@ -3120,6 +3305,15 @@ function carregarParaEditar(id){
   selSeg('embCond',d.embCond);
   selSeg('embConserto',d.embConserto);
   selSeg('embNovaCaixa',d.embNovaCaixa);
+  /* Caixa e madeira: desmonta "1200 × 400 × 300" de volta em três campos e
+     remonta as linhas de madeira. _updEmbMad() por último, para a caixa já
+     aparecer aberta se este recebimento precisava dela. */
+  (function(){
+    var m=String(d.caixaMed||'').split(/\s*[×x]\s*/);
+    setV('cxComp',m[0]||''); setV('cxLarg',m[1]||''); setV('cxAlt',m[2]||'');
+    _madeiraDeTexto(d.madeira||'');
+    _updEmbMad();
+  })();
   splitSel('servico',d.servico,'servicoDesc');
   selSeg('confcli',d.confcli);
   document.getElementById('pecas').innerHTML='';Object.keys(pecasState).forEach(k=>delete pecasState[k]);
@@ -3214,6 +3408,23 @@ function carregarParaEditar(id){
         const b=[].slice.call(pe.querySelectorAll('.'+cf[0]+'seg button')).find(x=>x.dataset.v===sn);
         if(b)b.click();
         renderSubList(pid,cf[0]);
+        /* Precisa conserto? Vem do campo próprio quando existe; senão é lido
+           do resumo que a planilha devolve. Ficha antiga (antes de 03/09/2026)
+           trazia "— precisa conserto" sempre que era não conforme: ali o Sim
+           é o que estava escrito, então é o que se remonta. */
+        if(sn==='Não conforme'){
+          var cons=p[cf[1]==='ponteira'?'ponteiraCons':'furoCons']||'';
+          if(!cons){
+            var s2=(v[cf[1]]||'');
+            if(/sem conserto/i.test(s2))cons='Não';
+            else if(/precisa conserto/i.test(s2))cons='Sim';
+          }
+          if(cons){
+            var cb=document.getElementById(cf[0]+'Cons-'+pid);
+            var bb=cb&&[].slice.call(cb.querySelectorAll('button')).find(x=>x.dataset.v===cons);
+            if(bb)bb.click();
+          }
+        }
       }
     });
     const est=p.estado||v.estado||'';
@@ -3255,7 +3466,11 @@ function carregarParaEditar(id){
 function _reaplicarFotosForm(dd){
   if(!dd)return;
   setTimeout(function(){try{renderTodasFotos();}catch(e){}},300);
-  if(dd.fotos&&dd.fotos.length){ fotos=dd.fotos.slice(); renderFotos(); }
+  /* filter(Boolean) fecha os buracos: a nuvem devolve as fotos por posição
+     (geral-0, geral-2…) e, se uma faltar, a lista fica com vão no meio. Com
+     vão, o índice da miniatura na tela deixa de bater com o índice na galeria
+     do item 8 — clicar numa foto abria outra. */
+  if(dd.fotos&&dd.fotos.length){ fotos=dd.fotos.filter(Boolean); renderFotos(); }
   var pes=document.querySelectorAll('.peca');
   (dd.pecas||[]).forEach(function(p,i){
     var pe=pes[i]; if(!pe)return; var pid=+pe.id.split('-')[1]; var st=pecasState[pid]; if(!st)return;
@@ -3436,7 +3651,9 @@ function limparForm(ask){
   Object.keys(sel).forEach(k=>sel[k]='');
   document.querySelectorAll('.chip.on,.seg button.on').forEach(x=>x.classList.remove('on','ok','bad'));
   document.querySelectorAll('.desc').forEach(d=>d.classList.add('hide'));
-  ['nfdivBox','embConsertoBox','embCaixaBox','embOrcMsg'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.add('hide');});
+  ['nfdivBox','embConsertoBox','embCaixaBox','embOrcMsg','embMadBox'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.add('hide');});
+  madeiras=[]; renderMadeiras();
+  ['cxComp','cxLarg','cxAlt'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   document.getElementById('alertaConf').style.display='none';
   document.getElementById('errbox').classList.remove('show');
   document.getElementById('pecas').innerHTML='';Object.keys(pecasState).forEach(k=>delete pecasState[k]);
@@ -3920,6 +4137,29 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
     return out;
   }
 
+  /* ═══ ESSE SLOT JÁ ESTÁ PREENCHIDO? — 03/09/2026 ═════════════════════════
+     Espelho do _aplicarSlot: em vez de gravar, responde se aquela posição já
+     tem foto neste aparelho. Serve para baixar só o que falta, em vez de
+     baixar tudo de novo ou — pior — não baixar nada. */
+  function _slotPreenchido(d,slot){
+    if(!d)return false;
+    if(slot==='assinatura')return !!d.assinatura;
+    var m=slot.match(/^geral-(\d+)$/);
+    if(m)return !!((d.fotos||[])[+m[1]]);
+    m=slot.match(/^p(\d+)-(foto|pt|fc)-(\d+)$/);
+    if(m){
+      var p=(d.pecas||[])[+m[1]]; if(!p)return false;
+      var k=+m[3];
+      if(m[2]==='foto')return !!((p.fotosPeca||[])[k]);
+      var lista=(m[2]==='pt')?'ponteiras':'furos';
+      var it=(p[lista]||[])[k];
+      return !!(it&&it.foto);
+    }
+    m=slot.match(/^p(\d+)-desenho$/);
+    if(m){ var pp=(d.pecas||[])[+m[1]]; return !!(pp&&pp.desenhoFoto); }
+    return false;
+  }
+
   /* Devolve a foto ao lugar certo do registro, lendo o nome do arquivo. */
   function _aplicarSlot(d,slot,src){
     if(!d||!src)return;
@@ -4000,14 +4240,27 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
   }
   window._comFotosDaNuvem=function(d,cb){
     try{
-      if(_temFotos(d)){ cb(d); return; }        // já estão neste aparelho
+      /* ═══ POR QUE NÃO SE PERGUNTA MAIS "TEM FOTO?" — 03/09/2026 ═══════════
+         Aqui havia: if(_temFotos(d)){ cb(d); return; }
+         E _temFotos responde true se existir UMA foto qualquer. Ou seja: um
+         recebimento que tivesse só a foto da ponteira era dado como completo,
+         e as fotos gerais do item 8 nunca eram buscadas na nuvem. Era esse o
+         "no item 8 não aparecem as fotos gerais" — elas estavam lá o tempo
+         todo, o app é que desistia antes de pedir.
+         Agora sempre se lista a pasta (chamada barata) e se baixa SÓ o que
+         falta neste aparelho. Sem internet, o catch adiante segue o caminho
+         antigo e nada trava. */
       if(!_fbOn()){ cb(d); return; }
       var done=false, fim=function(){ if(done)return; done=true; cb(d); };
       var t=setTimeout(fim,15000);              // foto por foto demora mais que um doc só
       _pasta(d.id).listAll().then(function(res){
         var itens=res.items||[];
         if(!itens.length) throw new Error('vazio');
-        return Promise.all(itens.map(function(it){
+        var faltam=itens.filter(function(it){
+          return !_slotPreenchido(d,it.name.replace(/\.[a-z]+$/i,''));
+        });
+        if(!faltam.length) return;              // tudo já está aqui: nada a baixar
+        return Promise.all(faltam.map(function(it){
           return _baixar(it).then(function(src){ _aplicarSlot(d,it.name.replace(/\.[a-z]+$/i,''),src); })
                             .catch(function(){});
         }));
