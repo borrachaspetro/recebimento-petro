@@ -314,6 +314,13 @@
           <button data-v="Não">Não</button>
           <button data-v="Sim">Sim</button>
         </div>
+        <!-- 04/09/2026 — "orçar conserto: Sim" sem dizer O QUE consertar não
+             serve de nada para quem vai fazer o orçamento. Quem recebe está
+             olhando para a embalagem; é a única pessoa que sabe. -->
+        <div id="embConsertoObsBox" class="hide" style="margin-top:8px">
+          <label>O que precisa ser consertado? <span class="req">*</span></label>
+          <input type="text" id="embConsertoObs" placeholder="Ex.: travessa quebrada de um lado, tampa solta…">
+        </div>
       </div>
       <div id="embCaixaBox" class="hide" style="margin-top:10px">
         <div class="grp" style="color:#333">Orçar nova caixa?</div>
@@ -598,8 +605,8 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v42';
-const APP_DATA='03/09/2026';
+const APP_VERSAO='v45';
+const APP_DATA='04/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
 let SHEET_URL=localStorage.getItem('petro_sheetUrl')||SHEET_URL_PADRAO;
@@ -779,23 +786,50 @@ document.querySelectorAll('#embTipo .chip').forEach(c=>{
     c.classList.toggle('on');
     if(c.classList.contains('on'))embTipoSel.add(c.dataset.v);else embTipoSel.delete(c.dataset.v);
     document.getElementById('embTipoDesc').classList.toggle('hide',!embTipoSel.has('Outros'));
-    _updEmbMad();
   };
 });
 
-/* ═══ CAIXA A FABRICAR E MADEIRA A COMPRAR — 03/09/2026 ═════════════════════
-   Quando aparece: peça a granel (chegou sem embalagem) ou "Orçar nova caixa?
-   = Sim". Nos dois casos alguém vai ter que fabricar a caixa.
+/* ═══ CAIXA A FABRICAR E MADEIRA A COMPRAR ═════════════════════════════════
+   Criado em 03/09/2026, gatilho CORRIGIDO em 04/09/2026.
+
+   Na v42 eu tinha ligado estes campos ao "A granel", e estava errado. A
+   Suzana explicou: a granel não quer dizer que vai fazer caixa — muitas
+   vezes é peça pequena, torcida, que o próprio cliente vem buscar. Ligar
+   pelo tipo de embalagem enchia a tela de pergunta em recebimento que
+   nunca ia ter caixa nenhuma.
+
+   O que manda é a CONDIÇÃO da embalagem (item 5), em dois caminhos:
+     Danificada  → orçar conserto?  e  orçar nova caixa?
+     Não possui  → orçar nova caixa?
+   E só quando "orçar nova caixa = Sim" é que existe caixa para fabricar.
+   Ou seja: a pergunta que abre estes campos é UMA só.
+
    Os campos são opcionais de propósito: na admissão às vezes não dá para
    medir na hora, e o comercial completa depois. Travar aqui só faria a
    pessoa inventar número para conseguir salvar. */
 let madeiras=[];
-function _precisaCaixa(){ return embTipoSel.has('A granel') || sel.embNovaCaixa==='Sim'; }
-function _updEmbMad(){
+function _precisaCaixa(){ return sel.embNovaCaixa==='Sim'; }
+/* preservar=true só na hora de ABRIR uma ficha salva: nesse momento não se
+   limpa nada. Recebimento gravado na v42 podia ter medida e madeira com
+   "orçar nova caixa" em branco — era o gatilho errado do "A granel". Sem
+   este cuidado, abrir uma dessas fichas apagaria o que já estava lá, que é
+   exatamente o tipo de perda silenciosa que passamos a semana caçando. */
+function _updEmbMad(preservar){
   var b=document.getElementById('embMadBox'); if(!b)return;
-  var mostra=_precisaCaixa();
+  var temDado=['cxComp','cxLarg','cxAlt'].some(function(id){
+                var i=document.getElementById(id); return i&&i.value; })
+              || madeiras.some(function(m){ return m.tipo||m.esp||m.larg||m.comp||m.qtd; });
+  var mostra=_precisaCaixa()||(preservar&&temDado);
   b.classList.toggle('hide',!mostra);
-  if(mostra&&!madeiras.length)madAdd();
+  if(mostra){ if(!madeiras.length)madAdd(); return; }
+  if(preservar)return;
+  /* Respondeu que NÃO vai fazer caixa nova: limpa medida e madeira. Aqui
+     limpar é o certo, ao contrário do friso e do produto — lá o campo sumia
+     da tela mas o dado continuava valendo; aqui a própria resposta diz que
+     não existe caixa. Deixar os números faria o orçamento cobrar uma caixa
+     que ninguém pediu. */
+  ['cxComp','cxLarg','cxAlt'].forEach(function(id){ var i=document.getElementById(id); if(i)i.value=''; });
+  madeiras=[]; renderMadeiras();
 }
 function madAdd(){ madeiras.push({tipo:'',esp:'',larg:'',comp:'',qtd:''}); renderMadeiras(); }
 function madRm(i){ madeiras.splice(i,1); if(!madeiras.length)madeiras.push({tipo:'',esp:'',larg:'',comp:'',qtd:''}); renderMadeiras(); }
@@ -857,17 +891,27 @@ function bindSeg(id,key,descId,descTrigger,after){
 }
 bindSeg('nfdiv','nfdiv','nfdivBox','Sim');
 bindSeg('embCond','embCond',null,null,onEmbCond);
-bindSeg('embConserto','embConserto',null,null,()=>_updEmbOrcMsg());
+bindSeg('embConserto','embConserto',null,null,()=>{_updEmbOrcMsg();_updEmbConsObs();});
 bindSeg('embNovaCaixa','embNovaCaixa',null,null,()=>{_updEmbOrcMsg();_updEmbMad();});
 bindSeg('confcli','confcli',null,null,(v)=>{document.getElementById('alertaConf').style.display=(v==='Não')?'block':'none';});
 function _clearSeg(id){document.querySelectorAll('#'+id+' button').forEach(b=>b.classList.remove('on'));}
 function _updEmbOrcMsg(){document.getElementById('embOrcMsg').classList.toggle('hide',!(sel.embConserto==='Sim'||sel.embNovaCaixa==='Sim'));}
+/* A observação do conserto só existe quando há conserto a orçar. Se a
+   resposta voltar para "Não", o texto é apagado junto — senão a ficha iria
+   para a planilha dizendo "não vai consertar" com a descrição do conserto
+   logo ao lado. */
+function _updEmbConsObs(){
+  var b=document.getElementById('embConsertoObsBox'); if(!b)return;
+  var mostra=(sel.embConserto==='Sim');
+  b.classList.toggle('hide',!mostra);
+  if(!mostra){ var i=document.getElementById('embConsertoObs'); if(i)i.value=''; }
+}
 function onEmbCond(v){
   document.getElementById('embConsertoBox').classList.toggle('hide',v!=='Danificada');
   document.getElementById('embCaixaBox').classList.toggle('hide',!(v==='Danificada'||v==='Não possui'));
   if(v!=='Danificada'){ sel.embConserto=''; _clearSeg('embConserto'); }
   if(v==='Boa'){ sel.embNovaCaixa=''; _clearSeg('embNovaCaixa'); }
-  _updEmbOrcMsg(); _updEmbMad();
+  _updEmbOrcMsg(); _updEmbConsObs(); _updEmbMad();
 }
 function toggleSemNota(){
   var chk=document.getElementById('nfSemNota'), nf=document.getElementById('nf'), wrap=document.getElementById('nfDivWrap');
@@ -1786,7 +1830,12 @@ function salvarFicha(enviarDepois){
   if(embTipoSel.size===0)erros.push('Tipo de embalagem');
   else if(embTipoSel.has('Outros')&&!val('embTipoDesc'))erros.push('Descrever embalagem (Outros)');
   if(!sel.embCond)erros.push('Condições da embalagem');
-  else if(sel.embCond==='Danificada'){ if(!sel.embConserto)erros.push('Orçar conserto da embalagem?'); if(!sel.embNovaCaixa)erros.push('Orçar nova caixa?'); }
+  else if(sel.embCond==='Danificada'){
+    if(!sel.embConserto)erros.push('Orçar conserto da embalagem?');
+    // "vai consertar: sim" sem dizer o quê não serve para quem orça
+    else if(sel.embConserto==='Sim'&&!val('embConsertoObs'))erros.push('O que precisa ser consertado na embalagem');
+    if(!sel.embNovaCaixa)erros.push('Orçar nova caixa?');
+  }
   else if(sel.embCond==='Não possui'){ if(!sel.embNovaCaixa)erros.push('Orçar nova caixa?'); }
   if(!sel.servico)erros.push('Tipo de serviço');
   else if(sel.servico==='Outros'&&!val('servicoDesc'))erros.push('Descrever o serviço (Outros)');
@@ -2102,6 +2151,7 @@ function _regAnterior(id){
 const _ROTULOS={resp:'Responsável',data:'Data',cliente:'Cliente',contato:'Contato',fone:'Fone',
   transp:'Transporte',nf:'NF',nfdiv:'Divergências NF',embTipo:'Embalagem',embCond:'Condições emb.',
   embConserto:'Orçar conserto',embNovaCaixa:'Orçar nova caixa',
+  embConsertoObs:'O que consertar na embalagem',
   caixaMed:'Medidas da caixa',madeira:'Madeira a comprar',servico:'Serviço',
   confcli:'Confirmado c/ cliente',obs:'Observações'};
 const _ROTULOS_PECA={cb:'C/B ou S/B',tipo:'Tipo de peça',produto:'Produto',qtde:'Qtde',
@@ -2157,6 +2207,7 @@ function coletar(pecas){
     nfQtdeNota:val('nfQtdeNota'),nfQtdeReceb:val('nfQtdeReceb'),
     embTipo:[...embTipoSel].map(t=>t==='Outros'?('Outros — '+val('embTipoDesc')):t).join(', '),
     embCond:sel.embCond,embConserto:sel.embConserto,embNovaCaixa:sel.embNovaCaixa,
+    embConsertoObs:val('embConsertoObs'),
     /* Caixa a fabricar: as três medidas viram UM campo só ("1200 × 400 × 300"),
        porque três colunas novas na planilha para um caso que é minoria só
        atrapalharia a leitura. O app volta a separar na hora de editar. */
@@ -2371,6 +2422,7 @@ function gerarPDFdoc(d,semFotos){
     var divTxt=(d.nfdiv==='Sim')?('Sim — nota '+(d.nfQtdeNota||'?')+' / recebida '+(d.nfQtdeReceb||'?')):(d.nfdiv||'Não');
     var recRows=[['Transporte',d.transp],['Nº NF',d.nf],['Divergências NF',divTxt],['Embalagem',d.embTipo||'—'],['Condições',d.embCond]];
     if(d.embCond==='Danificada')recRows.push(['Orçar conserto',d.embConserto||'—']);
+    if(d.embConsertoObs)recRows.push(['O que consertar',d.embConsertoObs]);
     if(d.embCond==='Danificada'||d.embCond==='Não possui')recRows.push(['Orçar nova caixa',d.embNovaCaixa||'—']);
     if(d.caixaMed)recRows.push(['Caixa a fabricar (mm)',d.caixaMed]);
     if(d.madeira)recRows.push(['Madeira a comprar',d.madeira]);
@@ -2712,7 +2764,8 @@ function montarTexto(d){
       :(d.confcli==='Sim'?' (confirmado)':' ⚠️ NÃO confirmado'))+'\n';
   t+='Peças: '+d.pecas.length+' ('+d.pecas.map(p=>p.cb==='S/B'?'Sem revest.':'Com revest.').join(', ')+')\n';
   if(d.embCond==='Danificada'||d.embCond==='Não possui'){
-    if(d.embConserto==='Sim')t+='Orçar conserto da embalagem: Sim (incluir no orçamento)\n';
+    if(d.embConserto==='Sim')t+='Orçar conserto da embalagem: Sim (incluir no orçamento)'
+      +(d.embConsertoObs?(' — '+d.embConsertoObs):'')+'\n';
     if(d.embNovaCaixa==='Sim')t+='Orçar nova caixa: Sim (incluir no orçamento)\n';
   }
   if(d.caixaMed||d.madeira){
@@ -3312,8 +3365,9 @@ function carregarParaEditar(id){
     var m=String(d.caixaMed||'').split(/\s*[×x]\s*/);
     setV('cxComp',m[0]||''); setV('cxLarg',m[1]||''); setV('cxAlt',m[2]||'');
     _madeiraDeTexto(d.madeira||'');
-    _updEmbMad();
+    _updEmbMad(true);   // abrindo ficha salva: mostrar o que existe, não apagar
   })();
+  setV('embConsertoObs',d.embConsertoObs); _updEmbConsObs();
   splitSel('servico',d.servico,'servicoDesc');
   selSeg('confcli',d.confcli);
   document.getElementById('pecas').innerHTML='';Object.keys(pecasState).forEach(k=>delete pecasState[k]);
@@ -3651,7 +3705,7 @@ function limparForm(ask){
   Object.keys(sel).forEach(k=>sel[k]='');
   document.querySelectorAll('.chip.on,.seg button.on').forEach(x=>x.classList.remove('on','ok','bad'));
   document.querySelectorAll('.desc').forEach(d=>d.classList.add('hide'));
-  ['nfdivBox','embConsertoBox','embCaixaBox','embOrcMsg','embMadBox'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.add('hide');});
+  ['nfdivBox','embConsertoBox','embCaixaBox','embOrcMsg','embMadBox','embConsertoObsBox'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.add('hide');});
   madeiras=[]; renderMadeiras();
   ['cxComp','cxLarg','cxAlt'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   document.getElementById('alertaConf').style.display='none';
