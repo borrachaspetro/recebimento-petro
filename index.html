@@ -605,7 +605,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v48';
+const APP_VERSAO='v49';
 const APP_DATA='04/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3767,12 +3767,33 @@ function testarPlanilha(silencioso){
     if(!silencioso)toast('Não conectou');}
   window[cb]=function(arr){limpar();
     const n=(arr&&arr.length)||0;
+    /* Zero registros com a planilha respondendo quer dizer, quase sempre, que
+       o crachá não foi aceito — não que a planilha esteja vazia. Os dois casos
+       chegam aqui iguais (lista vazia), então a tela diz o que fazer em vez de
+       cantar vitória. Ver o comentário do crachá logo abaixo. */
+    if(!n){
+      if(s)s.innerHTML='<span class="status off">✕ Respondeu, mas veio vazia — saia e entre de novo no app (o login pode ter vencido)</span>';
+      if(!silencioso)toast('Respondeu vazia — refaça o login');
+      return;
+    }
     if(s)s.innerHTML='<span class="status on">✓ Conectada — '+n+' registro(s) na planilha</span>';
     if(!silencioso)toast('Conectado ✓');};
-  const sc=document.createElement('script');sc.id=cb+'_s';
-  sc.src=url+(url.indexOf('?')<0?'?':'&')+'callback='+cb+'&k='+encodeURIComponent(CHAVE)+'&t='+Date.now();
-  sc.onerror=falhou;
-  document.body.appendChild(sc);
+  /* O CRACHÁ TAMBÉM VAI AQUI — 09/09/2026
+     Este botão era o único caminho de leitura que não mandava o crachá. Não
+     incomodava enquanto a planilha respondia a qualquer um; no dia em que ela
+     passou a exigir login (09/09), ele virou o pior tipo de defeito: a planilha
+     recusava, devolvia lista vazia, e a tela anunciava "✓ Conectada — 0
+     registro(s)". Verde, tranquilizador e errado — bem no botão que a pessoa
+     aperta justamente para saber se está tudo bem. */
+  _tokenLogin().then(function(tk){
+    const sc=document.createElement('script');sc.id=cb+'_s';
+    sc.src=url+(url.indexOf('?')<0?'?':'&')+'callback='+cb
+          +'&k='+encodeURIComponent(CHAVE)
+          +(tk?('&tk='+encodeURIComponent(tk)):'')
+          +'&t='+Date.now();
+    sc.onerror=falhou;
+    document.body.appendChild(sc);
+  }).catch(falhou);
 }
 /* ===== FILA DE REENVIO PRA PLANILHA =====
    Sem internet o envio falhava calado e o registro nunca chegava na planilha.
