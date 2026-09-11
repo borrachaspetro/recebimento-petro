@@ -605,7 +605,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v49';
+const APP_VERSAO='v50';
 const APP_DATA='04/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -647,19 +647,82 @@ bindChipsSingle('servico','servico','servicoDesc',['Outros'],function(){ aplicar
    Nada é apagado quando um bloco some — os campos continuam no formulário, só
    escondidos. Se a pessoa trocar o tipo de serviço, o que já tinha digitado
    volta a aparecer. */
+/* ═══ AS MEDIDAS DE CADA FORMA — 11/09/2026 ═══════════════════════════════
+   Quem manda nos rótulos é a geometria: matriz quadrada tem lado, circular
+   tem diâmetro. Uma tabela só, em vez de campo fixo com nome genérico, é o
+   que impede a ficha de pedir "medida B" e receber qualquer número.
+   Para acrescentar uma forma nova, basta uma linha aqui.                   */
+const _MED_MATRIZ={
+  'Quadrada':   ['Lado (mm)','Altura (mm)'],
+  'Retangular': ['Comprimento (mm)','Largura (mm)','Altura (mm)'],
+  'Circular':   ['Diâmetro (mm)','Altura (mm)']
+};
+const _MED_PECA={
+  'Trapezoidal':      ['Base maior (mm)','Base menor (mm)','Altura (mm)','Espessura (mm)'],
+  'Cúbica':           ['Aresta (mm)'],
+  'Retangular':       ['Comprimento (mm)','Largura (mm)','Altura (mm)'],
+  'Esférica':         ['Diâmetro (mm)'],
+  'Cilíndrica':       ['Diâmetro (mm)','Altura (mm)'],
+  'Triangular':       ['Base (mm)','Altura (mm)','Espessura (mm)'],
+  'Anel (cilíndrico)':['Diâmetro externo (mm)','Diâmetro interno (mm)','Altura (mm)'],
+  'Outros':           []          // texto livre; ver o campo p_tec_outros
+};
+
+/* Monta o texto que vai para a planilha: "Retangular 300 × 200 × 50 mm".
+   Guardar só os números perderia o rótulo, e ninguém sabe depois se 300 era
+   comprimento ou diâmetro. */
+function _textoMedidas(forma, rotulos, valores){
+  if(!forma) return '';
+  var partes=[];
+  (rotulos||[]).forEach(function(r,i){
+    var v=(valores[i]||'').trim();
+    if(v) partes.push(r.replace(' (mm)','')+' '+v);
+  });
+  return forma + (partes.length ? (' — '+partes.join(' × ')) : '');
+}
+
+/* O CAMINHO DE VOLTA — 11/09/2026.
+   A planilha guarda o texto montado, porque quem a abre é gente. Mas quando a
+   ficha vem DE LÁ para ser editada, os campos separados não existem: sem
+   desmontar o texto, a tela abriria vazia e o próximo salvamento gravaria
+   vazio por cima do que estava certo. Já aconteceu neste app com o friso e com
+   o produto, e é perda que ninguém vê na hora.
+
+   Desmontar é seguro porque quem montou fomos nós: "Forma — Rótulo 30 × Rótulo
+   20". Pega-se a forma antes do travessão e os números na ordem. Texto que
+   alguém editou à mão e não casa devolve o que deu para entender, nunca lixo. */
+function _destrincharTec(texto, tabela){
+  var vazio={ forma:'', valores:[] };
+  var t=String(texto||'').trim();
+  if(!t) return vazio;
+  var corte=t.indexOf(' — ');
+  var forma=(corte<0 ? t : t.slice(0,corte)).trim();
+  if(!tabela[forma] && forma!=='Outros') return vazio;   // forma que não conhecemos
+  if(corte<0) return { forma:forma, valores:[] };
+  var resto=t.slice(corte+3);
+  var valores=resto.split('×').map(function(p){
+    var m=String(p).match(/-?[\d.,]+/);        // "Comprimento 300" → "300"
+    return m ? m[0].trim() : '';
+  });
+  return { forma:forma, valores:valores };
+}
+
 const _BLOCOS_ESCONDIDOS={
-  normal:          ['info'],
+  normal:          ['info','tecnica'],
   /* Retífica: some a dureza solicitada (a borracha já está no rolo, só se
      mede a que tem) e some o "com ou sem revestimento" — em retífica a peça
      SEMPRE chega com borracha, é isso que vai ser retificado. A resposta é
      preenchida sozinha como C/B em aplicarModoServico. */
-  retifica:        ['info','dursol','rev'],
+  retifica:        ['info','tecnica','dursol','rev'],
   /* Sem informação: mostra o formulário inteiro. Não se sabe o que é o
      serviço, então não dá para esconder nada — quem recebe preenche o que
      consegue medir e marca NA no resto. */
-  seminfo:         ['info'],
+  seminfo:         ['info','tecnica'],
+  /* A ficha de peça técnica aparece SÓ aqui: é o único serviço em que se sabe
+     que a peça é matriz, molde ou prensada. Em Desenvolvimento ainda não se
+     sabe o que a peça vai ser — por isso lá continua só o texto livre. */
   tecnica:         ['rev','med','dureza','desenho','acab','acess','tipopeca','insp'],
-  desenvolvimento: ['rev','med','espec','dureza','desenho','acab','acess','tipopeca','insp']
+  desenvolvimento: ['rev','med','espec','dureza','desenho','acab','acess','tipopeca','insp','tecnica']
 };
 const _DICA_SERVICO={
   retifica:'Retífica: só a dureza medida. A solicitada não se aplica.',
@@ -667,6 +730,75 @@ const _DICA_SERVICO={
   desenvolvimento:'Desenvolvimento: anote tudo o que o cliente passar e peça a assinatura dele no item 10.',
   seminfo:'Sem informação: registre a peça como ela chegou, com fotos. O comercial define o serviço depois — e é ele que vai confirmar com o cliente.'
 };
+/* ═══ A CASCATA DA PEÇA TÉCNICA — 11/09/2026 ═══════════════════════════════
+   Liga os botões e o select do bloco data-blk="tecnica" de UMA peça.
+   Guarda tudo em pecasState[id].tec, junto com o resto da peça, para a
+   ficha reabrir do jeito que foi salva.                                    */
+function ligarPecaTecnica(div, id){
+  var st = pecasState[id]; if(!st) return;
+  st.tec = st.tec || { tipo:'', formato:'', cav:'', solido:'', inserto:'' };
+
+  function mostrarMedidas(caixaId, rotClasses, rotulos){
+    var caixa=document.getElementById(caixaId+'-'+id);
+    if(!caixa) return;
+    caixa.classList.toggle('hide', !rotulos || !rotulos.length);
+    rotClasses.forEach(function(cls, i){
+      var rot=div.querySelector('.'+cls);
+      var campo=rot ? rot.parentElement : null;
+      var tem=!!(rotulos && rotulos[i]);
+      if(rot && tem) rot.textContent=rotulos[i];
+      /* O campo que aquela forma não usa some. Deixar visível e vazio faria a
+         pessoa procurar o que preencher — e a validação cobraria um número
+         que a geometria não tem. */
+      if(campo) campo.classList.toggle('hide', !tem);
+      if(!tem){ var inp=campo?campo.querySelector('input'):null; if(inp) inp.value=''; }
+    });
+  }
+
+  function aplicarFormato(){
+    var f=st.tec.formato;
+    mostrarMedidas('tecMedBox', ['tecRotA','tecRotB','tecRotC'], _MED_MATRIZ[f]);
+  }
+  function aplicarSolido(){
+    var s=st.tec.solido;
+    var outros=(s==='Outros');
+    var campoOutros=div.querySelector('.p_tec_outros');
+    if(campoOutros) campoOutros.classList.toggle('hide', !outros);
+    mostrarMedidas('tecPecaBox', ['tecRotP1','tecRotP2','tecRotP3','tecRotP4'],
+                   outros ? [] : _MED_PECA[s]);
+  }
+  function aplicarTipo(){
+    /* Matriz e molde pedem a ficha do ferramental; prensada não tem
+       ferramenta para descrever e segue pelo texto livre de Informações. */
+    var temFerramental = (st.tec.tipo==='Matriz' || st.tec.tipo==='Molde');
+    var box=document.getElementById('tecFerr-'+id);
+    if(box) box.classList.toggle('hide', !temFerramental);
+  }
+
+  div.querySelectorAll('.tecseg button').forEach(function(b){
+    b.onclick=function(){
+      div.querySelectorAll('.tecseg button').forEach(function(x){x.classList.remove('on');});
+      b.classList.add('on'); st.tec.tipo=b.dataset.v; aplicarTipo(); _resumoPeca(div);
+    };
+  });
+  div.querySelectorAll('.tecfmt button').forEach(function(b){
+    b.onclick=function(){
+      div.querySelectorAll('.tecfmt button').forEach(function(x){x.classList.remove('on');});
+      b.classList.add('on'); st.tec.formato=b.dataset.v; aplicarFormato();
+    };
+  });
+  div.querySelectorAll('.tecins button').forEach(function(b){
+    b.onclick=function(){
+      div.querySelectorAll('.tecins button').forEach(function(x){x.classList.remove('on');});
+      b.classList.add('on'); st.tec.inserto=b.dataset.v;
+    };
+  });
+  var sel=div.querySelector('.p_tec_solido');
+  if(sel) sel.onchange=function(){ st.tec.solido=sel.value; aplicarSolido(); };
+
+  aplicarTipo(); aplicarFormato(); aplicarSolido();
+}
+
 function _modoServico(){
   var s=sel.servico||'';
   if(s==='Sem informação')return 'seminfo';
@@ -952,6 +1084,81 @@ function addPeca(){
       <textarea class="p_info" rows="6" placeholder="Descreva tudo o que o cliente passou: o que é a peça, medidas, aplicação, material, prazo, o que ele espera…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:9px;border:1px solid var(--borda);font-size:15px;font-family:inherit;resize:vertical"></textarea>
       <div class="hint" style="margin-top:2px">Escreva com as palavras dele. É este texto que vai para dentro e serve de registro depois.</div>
     </div>
+
+    <!-- ═══ PEÇA TÉCNICA — 11/09/2026 ═══════════════════════════════════════
+         Até aqui "Peça técnica" abria só o campo de texto livre acima. Quem
+         recebia escrevia do jeito que dava, e o que chegava lá dentro variava
+         de pessoa para pessoa — matriz sem contagem de cavidade, peça sem
+         medida, inserto que ninguém perguntou.
+
+         A Suzana listou o que a Petro faz de verdade: MATRIZ, MOLDE e PEÇA
+         PRENSADA (sem matriz). Os dois primeiros são ferramental e pedem a
+         mesma ficha; a prensada não tem ferramenta para descrever e segue só
+         com o texto livre.
+
+         A ficha abre em cascata, e essa é a ideia toda: o formato escolhido
+         decide QUAIS medidas aparecem. Pedir diâmetro de uma matriz quadrada
+         só ensina a preencher qualquer coisa para conseguir salvar.
+         O texto livre acima CONTINUA aparecendo — ele é onde cabe o que
+         nenhum campo previu. -->
+    <div data-blk="tecnica" class="hide">
+      <div class="grp" style="color:#333">Tipo de peça técnica <span style="color:var(--vermelho)">*</span></div>
+      <div class="seg tecseg" data-pid="${id}">
+        <button data-v="Matriz">Matriz</button>
+        <button data-v="Molde">Molde</button>
+        <button data-v="Prensada">Prensada (sem matriz)</button>
+      </div>
+      <div class="hint" style="margin-top:2px">Prensada é a peça sem matriz — segue só pelas Informações acima.</div>
+
+      <!-- Só matriz e molde: a prensada não tem ferramental para descrever. -->
+      <div class="tecFerr hide" id="tecFerr-${id}">
+        <div class="grp">Formato <span style="color:var(--vermelho)">*</span></div>
+        <div class="seg tecfmt" data-pid="${id}">
+          <button data-v="Quadrada">Quadrada</button>
+          <button data-v="Retangular">Retangular</button>
+          <button data-v="Circular">Circular</button>
+        </div>
+        <!-- Os rótulos destes três campos mudam conforme o formato: quadrada
+             pede lado e altura, circular pede diâmetro e altura. O terceiro
+             some quando a forma só tem duas medidas. -->
+        <div class="row3 tecMedBox hide" id="tecMedBox-${id}">
+          <div><label class="tecRotA">Medida A</label><input type="text" inputmode="decimal" class="p_tec_a" placeholder="mm"></div>
+          <div><label class="tecRotB">Medida B</label><input type="text" inputmode="decimal" class="p_tec_b" placeholder="mm"></div>
+          <div class="tecCampoC"><label class="tecRotC">Medida C</label><input type="text" inputmode="decimal" class="p_tec_c" placeholder="mm"></div>
+        </div>
+
+        <label>Quantidade de cavidades <span style="color:var(--vermelho)">*</span></label>
+        <input type="text" inputmode="numeric" class="p_tec_cav" placeholder="quantas peças a matriz faz por vez">
+
+        <div class="grp">Forma da peça (o que sai da cavidade) <span style="color:var(--vermelho)">*</span></div>
+        <select class="p_tec_solido">
+          <option value="">Selecione…</option>
+          <option>Trapezoidal</option>
+          <option>Cúbica</option>
+          <option>Retangular</option>
+          <option>Esférica</option>
+          <option>Cilíndrica</option>
+          <option>Triangular</option>
+          <option>Anel (cilíndrico)</option>
+          <option>Outros</option>
+        </select>
+        <div class="row3 tecPecaBox hide" id="tecPecaBox-${id}">
+          <div><label class="tecRotP1">Medida 1</label><input type="text" inputmode="decimal" class="p_tec_p1" placeholder="mm"></div>
+          <div><label class="tecRotP2">Medida 2</label><input type="text" inputmode="decimal" class="p_tec_p2" placeholder="mm"></div>
+          <div class="tecCampoP3"><label class="tecRotP3">Medida 3</label><input type="text" inputmode="decimal" class="p_tec_p3" placeholder="mm"></div>
+          <div class="tecCampoP4"><label class="tecRotP4">Medida 4</label><input type="text" inputmode="decimal" class="p_tec_p4" placeholder="mm"></div>
+        </div>
+        <!-- "Outros" existe porque peça fora do catálogo aparece, e obrigar a
+             escolher uma forma parecida gravaria medida errada de propósito. -->
+        <input type="text" class="p_tec_outros desc hide" placeholder="Descreva a forma e as medidas da peça">
+
+        <div class="grp">Tem inserto metálico? <span style="color:var(--vermelho)">*</span></div>
+        <div class="seg tecins" data-pid="${id}">
+          <button data-v="Sim">Sim</button>
+          <button data-v="Não">Não</button>
+        </div>
+      </div>
+    </div><!-- /data-blk=tecnica -->
 
     <div data-blk="rev">
     <div class="grp">Chegou com ou sem revestimento? <span style="color:var(--vermelho)">*</span></div>
@@ -1294,6 +1501,11 @@ function addPeca(){
       _resumoPeca(div);
     };
   });
+  /* ═══ PEÇA TÉCNICA — matriz, molde e prensada (11/09/2026) ═══════════════
+     A cascata: tipo → formato → medidas do formato; e forma da peça → medidas
+     daquela forma. Os rótulos mudam em vez de a tela encher de campo vazio.  */
+  ligarPecaTecnica(div, id);
+
   // tem desenho? (Sim → foto)
   div.querySelectorAll('.deseg button').forEach(b=>{
     b.onclick=()=>{
@@ -1802,6 +2014,27 @@ function coletarPecas(){
       acessSN:acessSN,acess:acess,acessDados:acessItens,acessOutros:acessOutros,
       peso:g('p_peso'),
       info:g('p_info'),   // texto livre da peça técnica / desenvolvimento
+
+      /* PEÇA TÉCNICA — 11/09/2026.
+         Vai em campos separados E em texto montado. O texto é o que a planilha
+         e o PDF mostram ("Retangular — Comprimento 300 × Largura 200"); os
+         campos separados é que fazem a ficha reabrir do jeito que foi salva. */
+      tecTipo:(st.tec&&st.tec.tipo)||'',
+      tecFormato:(st.tec&&st.tec.formato)||'',
+      tecMatriz:_textoMedidas((st.tec&&st.tec.formato)||'',
+                              _MED_MATRIZ[(st.tec&&st.tec.formato)||''],
+                              [g('p_tec_a'),g('p_tec_b'),g('p_tec_c')]),
+      tecCav:g('p_tec_cav'),
+      tecSolido:(st.tec&&st.tec.solido)||'',
+      tecPeca:((st.tec&&st.tec.solido)==='Outros')
+              ? ('Outros — '+g('p_tec_outros'))
+              : _textoMedidas((st.tec&&st.tec.solido)||'',
+                              _MED_PECA[(st.tec&&st.tec.solido)||''],
+                              [g('p_tec_p1'),g('p_tec_p2'),g('p_tec_p3'),g('p_tec_p4')]),
+      tecMedA:g('p_tec_a'),tecMedB:g('p_tec_b'),tecMedC:g('p_tec_c'),
+      tecP1:g('p_tec_p1'),tecP2:g('p_tec_p2'),tecP3:g('p_tec_p3'),tecP4:g('p_tec_p4'),
+      tecOutros:g('p_tec_outros'),
+      tecInserto:(st.tec&&st.tec.inserto)||'',
       garantia:pecasState[id].garantia||'',garMotivo:g('p_garmotivo'),
       molde:g('p_molde'),formula:g('p_formula'),pesoOrc:g('p_pesoorc'),preco:g('p_preco'),
       desenhoSN:st.desenhoSN||'',desenhoFoto:st.desenhoFoto||'',fotosPeca:(st.fotosPeca||[]).slice(),
@@ -1860,6 +2093,34 @@ function salvarFicha(enviarDepois){
     if(_modoSrv==='tecnica'||_modoSrv==='desenvolvimento'){
       if(faltou('p_info'))erros.push(n+'Informações (descreva o que o cliente passou)');
       if(!editId && !(st.fotosPeca&&st.fotosPeca.length))erros.push(n+'Foto (obrigatória)');
+
+      /* A FICHA DA PEÇA TÉCNICA — 11/09/2026.
+         Mesma regra do resto do app: cobra-se só o que está à vista. A peça
+         prensada não tem ferramental, então para nela; matriz e molde seguem
+         até o inserto. E as medidas cobradas são as da forma escolhida — a
+         quadrada não deve nada na terceira caixa, que nem aparece. */
+      if(_modoSrv==='tecnica'){
+        var tec=st.tec||{};
+        if(!tec.tipo){ erros.push(n+'Tipo de peça técnica (matriz, molde ou prensada)'); return; }
+        if(tec.tipo==='Prensada') return;
+
+        if(!tec.formato)erros.push(n+'Formato da matriz');
+        else{
+          var rot=_MED_MATRIZ[tec.formato]||[];
+          var cls=['p_tec_a','p_tec_b','p_tec_c'];
+          rot.forEach(function(r,i){ if(faltou(cls[i]))erros.push(n+r.replace(' (mm)','')+' da matriz'); });
+        }
+        if(faltou('p_tec_cav'))erros.push(n+'Quantidade de cavidades');
+        if(!tec.solido)erros.push(n+'Forma da peça');
+        else if(tec.solido==='Outros'){
+          if(faltou('p_tec_outros'))erros.push(n+'Descrever a forma e as medidas da peça');
+        }else{
+          var rotP=_MED_PECA[tec.solido]||[];
+          var clsP=['p_tec_p1','p_tec_p2','p_tec_p3','p_tec_p4'];
+          rotP.forEach(function(r,i){ if(faltou(clsP[i]))erros.push(n+r.replace(' (mm)','')+' da peça'); });
+        }
+        if(!tec.inserto)erros.push(n+'Tem inserto metálico?');
+      }
       return;
     }
 
@@ -2590,8 +2851,22 @@ function gerarPDFdoc(d,semFotos){
      Fica FORA da tabela de peças de propósito: é texto corrido e longo, que
      numa coluna estreita sairia picotado e ilegível. */
   function blocoInformacoes(){
-    var comInfo=(d.pecas||[]).map(function(p,i){return {i:i+1,t:(p&&p.info||'').trim()};})
-                             .filter(function(x){return !!x.t;});
+    /* A ficha da peça técnica entra JUNTO do texto livre, como as primeiras
+       linhas da peça — 11/09/2026. Quem orça lê este bloco; deixar a matriz e
+       as cavidades só na planilha obrigaria a abrir outra coisa para orçar. */
+    var comInfo=(d.pecas||[]).map(function(p,i){
+      var linhas=[];
+      if(p&&p.tecTipo){
+        linhas.push('Tipo: '+p.tecTipo);
+        if(p.tecMatriz)  linhas.push('Matriz: '+p.tecMatriz);
+        if(p.tecCav)     linhas.push('Cavidades: '+p.tecCav);
+        if(p.tecPeca)    linhas.push('Peça: '+p.tecPeca);
+        if(p.tecInserto) linhas.push('Inserto metálico: '+p.tecInserto);
+      }
+      var livre=(p&&p.info||'').trim();
+      if(livre) linhas.push(livre);
+      return {i:i+1,t:linhas.join('\n')};
+    }).filter(function(x){return !!x.t;});
     if(!comInfo.length)return;
     ensure(14);
     doc.setFillColor(105,105,105);doc.rect(M,y,CW,6,'F');
@@ -3380,6 +3655,47 @@ function carregarParaEditar(id){
     set('p_qtde',p.qtde);set('p_durmed',p.durmed);set('p_dursol',p.dursol);set('p_peso',p.peso);
     set('p_molde',p.molde);set('p_formula',p.formula);set('p_pesoorc',p.pesoOrc);set('p_preco',p.preco);
     set('p_info',p.info);   // texto livre da peça técnica / desenvolvimento
+
+    /* PEÇA TÉCNICA — reabrir a ficha do jeito que foi salva (11/09/2026).
+       A ordem importa: clicar no TIPO abre o bloco do ferramental, e só com
+       ele à vista os campos de dentro existem para receber valor. Por isso o
+       tipo vem primeiro, depois formato e forma, e só então as medidas. */
+    if(p.tecTipo){
+      const _tt=[].slice.call(pe.querySelectorAll('.tecseg button')).find(x=>x.dataset.v===p.tecTipo);
+      if(_tt)_tt.click();
+    }
+    /* Ficha que veio da PLANILHA traz só o texto montado — lá não existem os
+       campos separados. Desmonta-se o texto para a tela abrir preenchida.
+       Ficha que veio do aparelho ou do Firebase já tem os campos, e aí eles
+       mandam: são o original, o texto é o derivado. */
+    const _mtz = p.tecFormato ? null : _destrincharTec(p.tecMatriz, _MED_MATRIZ);
+    const _pc  = p.tecSolido  ? null : _destrincharTec(p.tecPeca,  _MED_PECA);
+    const _fmt = p.tecFormato || (_mtz && _mtz.forma) || '';
+    const _sol = p.tecSolido  || (_pc  && _pc.forma)  || '';
+
+    if(_fmt){
+      const _tf=[].slice.call(pe.querySelectorAll('.tecfmt button')).find(x=>x.dataset.v===_fmt);
+      if(_tf)_tf.click();
+    }
+    if(_sol){
+      const _ts2=pe.querySelector('.p_tec_solido');
+      if(_ts2){ _ts2.value=_sol; _ts2.dispatchEvent(new Event('change')); }
+    }
+    if(p.tecInserto){
+      const _ti=[].slice.call(pe.querySelectorAll('.tecins button')).find(x=>x.dataset.v===p.tecInserto);
+      if(_ti)_ti.click();
+    }
+    set('p_tec_cav',p.tecCav);
+    const _vm=_mtz?_mtz.valores:[];
+    set('p_tec_a',p.tecMedA||_vm[0]||''); set('p_tec_b',p.tecMedB||_vm[1]||'');
+    set('p_tec_c',p.tecMedC||_vm[2]||'');
+    const _vp=_pc?_pc.valores:[];
+    set('p_tec_p1',p.tecP1||_vp[0]||''); set('p_tec_p2',p.tecP2||_vp[1]||'');
+    set('p_tec_p3',p.tecP3||_vp[2]||''); set('p_tec_p4',p.tecP4||_vp[3]||'');
+    /* "Outros" na planilha vira "Outros — o que a pessoa escreveu". */
+    set('p_tec_outros', p.tecOutros ||
+        (_sol==='Outros' ? String(p.tecPeca||'').replace(/^Outros\s*—\s*/,'') : ''));
+
     set('p_garmotivo',p.garMotivo);
     if(p.garantia){const gb=[].slice.call(pe.querySelectorAll('.garseg button')).find(x=>x.dataset.v===p.garantia);if(gb)gb.click();}
     // tipo pode vir como "Outros — manopla": a opção é a parte antes do travessão
