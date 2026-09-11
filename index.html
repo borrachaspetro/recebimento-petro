@@ -605,7 +605,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v50';
+const APP_VERSAO='v51';
 const APP_DATA='04/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -681,6 +681,35 @@ function _textoMedidas(forma, rotulos, valores){
   return forma + (partes.length ? (' — '+partes.join(' × ')) : '');
 }
 
+/* As cavidades que vão para o registro. Iguais → só a primeira, porque é a
+   que vale para todas; guardar oito cópias da mesma medida só criaria oito
+   lugares para elas divergirem. */
+function _cavsParaSalvar(st){
+  var tec=(st&&st.tec)||{};
+  var cavs=(tec.cavs||[]).map(function(c){
+    return { solido:c.solido||'', m:(c.m||[]).slice(), outros:c.outros||'' };
+  });
+  if(!cavs.length) return [];
+  return (tec.cavIguais==='Não') ? cavs : cavs.slice(0,1);
+}
+
+/* O texto das cavidades, para a planilha e o PDF.
+   Iguais:      "Cilíndrica — Diâmetro 40 × Altura 25"
+   Diferentes:  "1) Cilíndrica — … | 2) Cúbica — Aresta 30"                */
+function _textoCavidades(st){
+  var tec=(st&&st.tec)||{};
+  var cavs=_cavsParaSalvar(st);
+  if(!cavs.length) return '';
+  var partes=cavs.map(function(c){
+    return (c.solido==='Outros')
+      ? ('Outros — '+(c.outros||''))
+      : _textoMedidas(c.solido, _MED_PECA[c.solido], c.m||[]);
+  }).filter(Boolean);
+  if(!partes.length) return '';
+  if(tec.cavIguais!=='Não') return partes[0];
+  return partes.map(function(p,i){ return (i+1)+') '+p; }).join(' | ');
+}
+
 /* O CAMINHO DE VOLTA — 11/09/2026.
    A planilha guarda o texto montado, porque quem a abre é gente. Mas quando a
    ficha vem DE LÁ para ser editada, os campos separados não existem: sem
@@ -730,6 +759,80 @@ const _DICA_SERVICO={
   desenvolvimento:'Desenvolvimento: anote tudo o que o cliente passar e peça a assinatura dele no item 10.',
   seminfo:'Sem informação: registre a peça como ela chegou, com fotos. O comercial define o serviço depois — e é ele que vai confirmar com o cliente.'
 };
+/* ═══ AS CAVIDADES — 11/09/2026 ═══════════════════════════════════════════
+   Uma lista, e não dois campos fixos. A Suzana pediu "por quantas forem":
+   matriz de três peças diferentes existe, e fixar em duas só adiaria o
+   problema para o dia em que uma aparecesse.
+
+   Cada cavidade é { solido, m:[4 medidas], outros } e mora em
+   pecasState[id].tec.cavs — mesmo lugar do resto da peça, para a ficha
+   reabrir inteira. O padrão é o das ponteiras (subAdd/renderSubList): estado
+   no pecasState, funções globais, e a tela redesenhada a cada mexida.       */
+function _cavsDe(id){
+  var st=pecasState[id]; if(!st) return [];
+  st.tec = st.tec || {};
+  if(!st.tec.cavs || !st.tec.cavs.length) st.tec.cavs=[{solido:'',m:['','','',''],outros:''}];
+  return st.tec.cavs;
+}
+function cavAdd(id){ _cavsDe(id).push({solido:'',m:['','','',''],outros:''}); renderCavs(id); }
+function cavRm(id,i){ var c=_cavsDe(id); if(c.length>1){ c.splice(i,1); renderCavs(id); } }
+function cavSolido(id,i,v){ _cavsDe(id)[i].solido=v; renderCavs(id); }
+/* Medida e texto NÃO redesenham a lista: redesenhar a cada tecla tiraria o
+   cursor do campo no meio da digitação. */
+function cavMed(id,i,k,v){ _cavsDe(id)[i].m[k]=v; }
+function cavOutros(id,i,v){ _cavsDe(id)[i].outros=v; }
+
+function renderCavs(id){
+  var pe=document.getElementById('peca-'+id); if(!pe) return;
+  var lista=pe.querySelector('.cavList'); if(!lista) return;
+  var st=pecasState[id], tec=(st&&st.tec)||{};
+  var iguais=(tec.cavIguais!=='Não');
+  var cavs=_cavsDe(id);
+
+  /* Iguais: uma ficha só, que vale para todas — é o que a Suzana definiu.
+     Diferentes: uma por cavidade, e o botão de adicionar aparece. */
+  var mostrar = iguais ? cavs.slice(0,1) : cavs;
+
+  lista.innerHTML = mostrar.map(function(c,i){
+    var rot=(c.solido==='Outros') ? [] : (_MED_PECA[c.solido]||[]);
+    var campos=rot.map(function(r,k){
+      return '<div><label>'+r+'</label>'+
+             '<input type="text" inputmode="decimal" value="'+(c.m[k]||'')+'" '+
+             'oninput="cavMed('+id+','+i+','+k+',this.value)" placeholder="mm"></div>';
+    }).join('');
+    var titulo = iguais ? 'Medidas da peça <span class="hint">(valem para todas as cavidades)</span>'
+                        : ('Cavidade '+(i+1));
+    var remover = (!iguais && cavs.length>1)
+      ? '<button type="button" class="rm" onclick="cavRm('+id+','+i+')">Remover</button>' : '';
+    return '<div class="cavItem" style="border:1px solid var(--borda);border-radius:9px;padding:8px;margin:6px 0">'+
+      '<div class="grp" style="margin-top:0">'+titulo+' '+remover+'</div>'+
+      '<select onchange="cavSolido('+id+','+i+',this.value)">'+
+        ['','Trapezoidal','Cúbica','Retangular','Esférica','Cilíndrica','Triangular','Anel (cilíndrico)','Outros']
+          .map(function(o){ return '<option value="'+o+'"'+(o===c.solido?' selected':'')+'>'+(o||'Selecione a forma…')+'</option>'; }).join('')+
+      '</select>'+
+      (campos ? '<div class="row3">'+campos+'</div>' : '')+
+      (c.solido==='Outros'
+        ? '<input type="text" class="desc" value="'+String(c.outros||'').replace(/"/g,'&quot;')+'" '+
+          'oninput="cavOutros('+id+','+i+',this.value)" placeholder="Descreva a forma e as medidas da peça">'
+        : '')+
+    '</div>';
+  }).join('');
+
+  var btn=pe.querySelector('.cavAddBtn');
+  if(btn) btn.classList.toggle('hide', iguais);
+
+  /* Quando a pessoa diz que são diferentes, o número de fichas devia bater
+     com a quantidade de cavidades que ela informou. Avisar é melhor que
+     travar: pode ser que ela ainda não tenha terminado de preencher. */
+  var aviso=pe.querySelector('.cavAviso');
+  if(aviso){
+    var qtd=parseInt((pe.querySelector('.p_tec_cav')||{}).value,10);
+    aviso.textContent = (!iguais && qtd>0 && qtd!==cavs.length)
+      ? ('Você informou '+qtd+' cavidade(s) e descreveu '+cavs.length+'.')
+      : '';
+  }
+}
+
 /* ═══ A CASCATA DA PEÇA TÉCNICA — 11/09/2026 ═══════════════════════════════
    Liga os botões e o select do bloco data-blk="tecnica" de UMA peça.
    Guarda tudo em pecasState[id].tec, junto com o resto da peça, para a
@@ -759,13 +862,12 @@ function ligarPecaTecnica(div, id){
     var f=st.tec.formato;
     mostrarMedidas('tecMedBox', ['tecRotA','tecRotB','tecRotC'], _MED_MATRIZ[f]);
   }
-  function aplicarSolido(){
-    var s=st.tec.solido;
-    var outros=(s==='Outros');
-    var campoOutros=div.querySelector('.p_tec_outros');
-    if(campoOutros) campoOutros.classList.toggle('hide', !outros);
-    mostrarMedidas('tecPecaBox', ['tecRotP1','tecRotP2','tecRotP3','tecRotP4'],
-                   outros ? [] : _MED_PECA[s]);
+  function aplicarIguais(){
+    var box=document.getElementById('cavBox-'+id);
+    /* A lista só aparece depois de respondida a pergunta: sem resposta, não
+       se sabe se é uma ficha ou várias. */
+    if(box) box.classList.toggle('hide', !st.tec.cavIguais);
+    renderCavs(id);
   }
   function aplicarTipo(){
     /* Matriz e molde pedem a ficha do ferramental; prensada não tem
@@ -793,10 +895,18 @@ function ligarPecaTecnica(div, id){
       b.classList.add('on'); st.tec.inserto=b.dataset.v;
     };
   });
-  var sel=div.querySelector('.p_tec_solido');
-  if(sel) sel.onchange=function(){ st.tec.solido=sel.value; aplicarSolido(); };
+  div.querySelectorAll('.tecig button').forEach(function(b){
+    b.onclick=function(){
+      div.querySelectorAll('.tecig button').forEach(function(x){x.classList.remove('on');});
+      b.classList.add('on'); st.tec.cavIguais=b.dataset.v; aplicarIguais();
+    };
+  });
+  /* Mudou a quantidade de cavidades → o aviso de "informou 4 e descreveu 2"
+     se refaz. Só o aviso; o que a pessoa digitou fica onde está. */
+  var qtd=div.querySelector('.p_tec_cav');
+  if(qtd) qtd.oninput=function(){ renderCavs(id); };
 
-  aplicarTipo(); aplicarFormato(); aplicarSolido();
+  aplicarTipo(); aplicarFormato(); aplicarIguais();
 }
 
 function _modoServico(){
@@ -1130,27 +1240,22 @@ function addPeca(){
         <label>Quantidade de cavidades <span style="color:var(--vermelho)">*</span></label>
         <input type="text" inputmode="numeric" class="p_tec_cav" placeholder="quantas peças a matriz faz por vez">
 
-        <div class="grp">Forma da peça (o que sai da cavidade) <span style="color:var(--vermelho)">*</span></div>
-        <select class="p_tec_solido">
-          <option value="">Selecione…</option>
-          <option>Trapezoidal</option>
-          <option>Cúbica</option>
-          <option>Retangular</option>
-          <option>Esférica</option>
-          <option>Cilíndrica</option>
-          <option>Triangular</option>
-          <option>Anel (cilíndrico)</option>
-          <option>Outros</option>
-        </select>
-        <div class="row3 tecPecaBox hide" id="tecPecaBox-${id}">
-          <div><label class="tecRotP1">Medida 1</label><input type="text" inputmode="decimal" class="p_tec_p1" placeholder="mm"></div>
-          <div><label class="tecRotP2">Medida 2</label><input type="text" inputmode="decimal" class="p_tec_p2" placeholder="mm"></div>
-          <div class="tecCampoP3"><label class="tecRotP3">Medida 3</label><input type="text" inputmode="decimal" class="p_tec_p3" placeholder="mm"></div>
-          <div class="tecCampoP4"><label class="tecRotP4">Medida 4</label><input type="text" inputmode="decimal" class="p_tec_p4" placeholder="mm"></div>
+        <!-- AS CAVIDADES SÃO IGUAIS? — 11/09/2026, regra da Suzana.
+             Matriz de 8 cavidades iguais se descreve uma vez; matriz que faz
+             peças diferentes precisa de uma medida por cavidade. Perguntar
+             antes evita os dois erros: repetir oito vezes a mesma coisa, ou
+             registrar uma medida só quando as peças são diferentes. -->
+        <div class="grp">As cavidades são iguais? <span style="color:var(--vermelho)">*</span></div>
+        <div class="seg tecig" data-pid="${id}">
+          <button data-v="Sim">Sim, todas iguais</button>
+          <button data-v="Não">Não, são diferentes</button>
         </div>
-        <!-- "Outros" existe porque peça fora do catálogo aparece, e obrigar a
-             escolher uma forma parecida gravaria medida errada de propósito. -->
-        <input type="text" class="p_tec_outros desc hide" placeholder="Descreva a forma e as medidas da peça">
+
+        <div class="cavBox hide" id="cavBox-${id}">
+          <div class="cavList"></div>
+          <button type="button" class="addsub cavAddBtn hide" onclick="cavAdd(${id})">＋ Adicionar cavidade</button>
+          <div class="hint cavAviso" style="margin-top:4px"></div>
+        </div>
 
         <div class="grp">Tem inserto metálico? <span style="color:var(--vermelho)">*</span></div>
         <div class="seg tecins" data-pid="${id}">
@@ -2025,15 +2130,13 @@ function coletarPecas(){
                               _MED_MATRIZ[(st.tec&&st.tec.formato)||''],
                               [g('p_tec_a'),g('p_tec_b'),g('p_tec_c')]),
       tecCav:g('p_tec_cav'),
-      tecSolido:(st.tec&&st.tec.solido)||'',
-      tecPeca:((st.tec&&st.tec.solido)==='Outros')
-              ? ('Outros — '+g('p_tec_outros'))
-              : _textoMedidas((st.tec&&st.tec.solido)||'',
-                              _MED_PECA[(st.tec&&st.tec.solido)||''],
-                              [g('p_tec_p1'),g('p_tec_p2'),g('p_tec_p3'),g('p_tec_p4')]),
+      tecCavIguais:(st.tec&&st.tec.cavIguais)||'',
+      /* A lista de cavidades vai inteira (para a ficha reabrir) e também
+         resumida em texto (para a planilha e o PDF). Cavidades iguais viram
+         uma linha só; diferentes saem numeradas e separadas por " | ". */
+      tecCavs:_cavsParaSalvar(st),
+      tecPeca:_textoCavidades(st),
       tecMedA:g('p_tec_a'),tecMedB:g('p_tec_b'),tecMedC:g('p_tec_c'),
-      tecP1:g('p_tec_p1'),tecP2:g('p_tec_p2'),tecP3:g('p_tec_p3'),tecP4:g('p_tec_p4'),
-      tecOutros:g('p_tec_outros'),
       tecInserto:(st.tec&&st.tec.inserto)||'',
       garantia:pecasState[id].garantia||'',garMotivo:g('p_garmotivo'),
       molde:g('p_molde'),formula:g('p_formula'),pesoOrc:g('p_pesoorc'),preco:g('p_preco'),
@@ -2111,13 +2214,25 @@ function salvarFicha(enviarDepois){
           rot.forEach(function(r,i){ if(faltou(cls[i]))erros.push(n+r.replace(' (mm)','')+' da matriz'); });
         }
         if(faltou('p_tec_cav'))erros.push(n+'Quantidade de cavidades');
-        if(!tec.solido)erros.push(n+'Forma da peça');
-        else if(tec.solido==='Outros'){
-          if(faltou('p_tec_outros'))erros.push(n+'Descrever a forma e as medidas da peça');
-        }else{
-          var rotP=_MED_PECA[tec.solido]||[];
-          var clsP=['p_tec_p1','p_tec_p2','p_tec_p3','p_tec_p4'];
-          rotP.forEach(function(r,i){ if(faltou(clsP[i]))erros.push(n+r.replace(' (mm)','')+' da peça'); });
+        if(!tec.cavIguais)erros.push(n+'As cavidades são iguais?');
+        else{
+          /* Cada cavidade descrita é cobrada por inteiro. Cavidades iguais
+             têm uma ficha só; diferentes, uma por peça — e uma delas em
+             branco no meio da lista passaria despercebida sem isto. */
+          var cavs=(tec.cavIguais==='Não') ? (tec.cavs||[]) : (tec.cavs||[]).slice(0,1);
+          if(!cavs.length)erros.push(n+'Forma da peça');
+          cavs.forEach(function(c,ci){
+            var onde = (tec.cavIguais==='Não') ? (' (cavidade '+(ci+1)+')') : '';
+            if(!c.solido){ erros.push(n+'Forma da peça'+onde); return; }
+            if(c.solido==='Outros'){
+              if(!String(c.outros||'').trim())erros.push(n+'Descrever a forma e as medidas da peça'+onde);
+              return;
+            }
+            (_MED_PECA[c.solido]||[]).forEach(function(r,i){
+              if(!String((c.m||[])[i]||'').trim())
+                erros.push(n+r.replace(' (mm)','')+' da peça'+onde);
+            });
+          });
         }
         if(!tec.inserto)erros.push(n+'Tem inserto metálico?');
       }
@@ -2859,7 +2974,9 @@ function gerarPDFdoc(d,semFotos){
       if(p&&p.tecTipo){
         linhas.push('Tipo: '+p.tecTipo);
         if(p.tecMatriz)  linhas.push('Matriz: '+p.tecMatriz);
-        if(p.tecCav)     linhas.push('Cavidades: '+p.tecCav);
+        if(p.tecCav)     linhas.push('Cavidades: '+p.tecCav+
+                                     (p.tecCavIguais==='Não'?' (diferentes entre si)':
+                                      p.tecCavIguais==='Sim'?' (todas iguais)':''));
         if(p.tecPeca)    linhas.push('Peça: '+p.tecPeca);
         if(p.tecInserto) linhas.push('Inserto metálico: '+p.tecInserto);
       }
@@ -3669,17 +3786,11 @@ function carregarParaEditar(id){
        Ficha que veio do aparelho ou do Firebase já tem os campos, e aí eles
        mandam: são o original, o texto é o derivado. */
     const _mtz = p.tecFormato ? null : _destrincharTec(p.tecMatriz, _MED_MATRIZ);
-    const _pc  = p.tecSolido  ? null : _destrincharTec(p.tecPeca,  _MED_PECA);
     const _fmt = p.tecFormato || (_mtz && _mtz.forma) || '';
-    const _sol = p.tecSolido  || (_pc  && _pc.forma)  || '';
 
     if(_fmt){
       const _tf=[].slice.call(pe.querySelectorAll('.tecfmt button')).find(x=>x.dataset.v===_fmt);
       if(_tf)_tf.click();
-    }
-    if(_sol){
-      const _ts2=pe.querySelector('.p_tec_solido');
-      if(_ts2){ _ts2.value=_sol; _ts2.dispatchEvent(new Event('change')); }
     }
     if(p.tecInserto){
       const _ti=[].slice.call(pe.querySelectorAll('.tecins button')).find(x=>x.dataset.v===p.tecInserto);
@@ -3689,12 +3800,35 @@ function carregarParaEditar(id){
     const _vm=_mtz?_mtz.valores:[];
     set('p_tec_a',p.tecMedA||_vm[0]||''); set('p_tec_b',p.tecMedB||_vm[1]||'');
     set('p_tec_c',p.tecMedC||_vm[2]||'');
-    const _vp=_pc?_pc.valores:[];
-    set('p_tec_p1',p.tecP1||_vp[0]||''); set('p_tec_p2',p.tecP2||_vp[1]||'');
-    set('p_tec_p3',p.tecP3||_vp[2]||''); set('p_tec_p4',p.tecP4||_vp[3]||'');
-    /* "Outros" na planilha vira "Outros — o que a pessoa escreveu". */
-    set('p_tec_outros', p.tecOutros ||
-        (_sol==='Outros' ? String(p.tecPeca||'').replace(/^Outros\s*—\s*/,'') : ''));
+
+    const _pid = +pe.id.split('-')[1];
+    /* AS CAVIDADES. Do aparelho vem a lista pronta; da planilha vem só o
+       texto ("1) Cilíndrica — … | 2) Cúbica — …"), que é desmontado de volta.
+       O "|" separa as cavidades e o "N)" na frente é descartado. */
+    pecasState[_pid].tec = pecasState[_pid].tec || {};
+    if(Array.isArray(p.tecCavs) && p.tecCavs.length){
+      pecasState[_pid].tec.cavs = p.tecCavs.map(function(c){
+        return { solido:c.solido||'', m:(c.m||['','','','']).slice(), outros:c.outros||'' };
+      });
+    }else if(p.tecPeca){
+      pecasState[_pid].tec.cavs = String(p.tecPeca).split('|').map(function(parte){
+        const limpo=parte.trim().replace(/^\d+\)\s*/,'');
+        if(/^Outros\s*—/.test(limpo)) return { solido:'Outros', m:['','','',''], outros:limpo.replace(/^Outros\s*—\s*/,'') };
+        const d=_destrincharTec(limpo,_MED_PECA);
+        const m=['','','',''];
+        (d.valores||[]).forEach(function(v,k){ if(k<4) m[k]=v; });
+        return { solido:d.forma, m:m, outros:'' };
+      }).filter(function(c){ return !!c.solido; });
+    }
+    /* A resposta de "são iguais?" pode não ter vindo (registro antigo, ou
+       planilha): mais de uma cavidade descrita só acontece quando são
+       diferentes, então dá para deduzir sem perguntar de novo. */
+    const _ig = p.tecCavIguais ||
+                ((pecasState[_pid].tec.cavs||[]).length>1 ? 'Não' : (p.tecPeca?'Sim':''));
+    if(_ig){
+      const _tg=[].slice.call(pe.querySelectorAll('.tecig button')).find(x=>x.dataset.v===_ig);
+      if(_tg)_tg.click();
+    }
 
     set('p_garmotivo',p.garMotivo);
     if(p.garantia){const gb=[].slice.call(pe.querySelectorAll('.garseg button')).find(x=>x.dataset.v===p.garantia);if(gb)gb.click();}
