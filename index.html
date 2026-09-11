@@ -605,8 +605,8 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v51';
-const APP_DATA='04/09/2026';
+const APP_VERSAO='v52';
+const APP_DATA='11/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
 let SHEET_URL=localStorage.getItem('petro_sheetUrl')||SHEET_URL_PADRAO;
@@ -665,8 +665,23 @@ const _MED_PECA={
   'Cilíndrica':       ['Diâmetro (mm)','Altura (mm)'],
   'Triangular':       ['Base (mm)','Altura (mm)','Espessura (mm)'],
   'Anel (cilíndrico)':['Diâmetro externo (mm)','Diâmetro interno (mm)','Altura (mm)'],
+  /* ANEL COM FLANGE — 11/09/2026, pedido da Suzana com a peça na mão.
+     É o anel de sempre com um disco numa das pontas. São CINCO medidas, e
+     todas precisam de nome próprio: há dois diâmetros externos (o do disco e
+     o do corpo) e duas alturas possíveis (a do disco e a total). Chamar
+     qualquer um dos dois de "diâmetro externo" seria pedir para o número
+     chegar trocado. A altura é a TOTAL, medida com o flange junto. */
+  'Anel com flange': ['Diâmetro do flange (mm)','Espessura do flange (mm)',
+                      'Diâmetro do corpo (mm)','Diâmetro do furo (mm)','Altura total (mm)'],
   'Outros':           []          // texto livre; ver o campo p_tec_outros
 };
+/* Quantas medidas cabem numa cavidade. Sai da própria tabela, e não de um 4
+   digitado à mão: quem acrescentar uma forma de seis medidas não vai lembrar
+   de procurar o número em outros quatro lugares do arquivo — foi o que quase
+   aconteceu com o anel com flange, que tem cinco e a lista guardava quatro. */
+const _MAX_MED = Object.keys(_MED_PECA).concat(Object.keys(_MED_MATRIZ))
+  .reduce(function(n,k){ return Math.max(n, (_MED_PECA[k]||_MED_MATRIZ[k]||[]).length); }, 0);
+function _medVazias(){ return new Array(_MAX_MED).fill(''); }
 
 /* Monta o texto que vai para a planilha: "Retangular 300 × 200 × 50 mm".
    Guardar só os números perderia o rótulo, e ninguém sabe depois se 300 era
@@ -771,10 +786,10 @@ const _DICA_SERVICO={
 function _cavsDe(id){
   var st=pecasState[id]; if(!st) return [];
   st.tec = st.tec || {};
-  if(!st.tec.cavs || !st.tec.cavs.length) st.tec.cavs=[{solido:'',m:['','','',''],outros:''}];
+  if(!st.tec.cavs || !st.tec.cavs.length) st.tec.cavs=[{solido:'',m:_medVazias(),outros:''}];
   return st.tec.cavs;
 }
-function cavAdd(id){ _cavsDe(id).push({solido:'',m:['','','',''],outros:''}); renderCavs(id); }
+function cavAdd(id){ _cavsDe(id).push({solido:'',m:_medVazias(),outros:''}); renderCavs(id); }
 function cavRm(id,i){ var c=_cavsDe(id); if(c.length>1){ c.splice(i,1); renderCavs(id); } }
 function cavSolido(id,i,v){ _cavsDe(id)[i].solido=v; renderCavs(id); }
 /* Medida e texto NÃO redesenham a lista: redesenhar a cada tecla tiraria o
@@ -807,7 +822,11 @@ function renderCavs(id){
     return '<div class="cavItem" style="border:1px solid var(--borda);border-radius:9px;padding:8px;margin:6px 0">'+
       '<div class="grp" style="margin-top:0">'+titulo+' '+remover+'</div>'+
       '<select onchange="cavSolido('+id+','+i+',this.value)">'+
-        ['','Trapezoidal','Cúbica','Retangular','Esférica','Cilíndrica','Triangular','Anel (cilíndrico)','Outros']
+        /* A lista SAI DA TABELA _MED_PECA, não de uma cópia escrita aqui.
+           Duas listas para a mesma coisa divergem no dia em que alguém
+           acrescenta a forma num lugar só — e a forma nova simplesmente não
+           apareceria no menu, sem erro nenhum na tela. */
+        [''].concat(Object.keys(_MED_PECA))
           .map(function(o){ return '<option value="'+o+'"'+(o===c.solido?' selected':'')+'>'+(o||'Selecione a forma…')+'</option>'; }).join('')+
       '</select>'+
       (campos ? '<div class="row3">'+campos+'</div>' : '')+
@@ -3808,15 +3827,15 @@ function carregarParaEditar(id){
     pecasState[_pid].tec = pecasState[_pid].tec || {};
     if(Array.isArray(p.tecCavs) && p.tecCavs.length){
       pecasState[_pid].tec.cavs = p.tecCavs.map(function(c){
-        return { solido:c.solido||'', m:(c.m||['','','','']).slice(), outros:c.outros||'' };
+        return { solido:c.solido||'', m:(c.m||_medVazias()).slice(), outros:c.outros||'' };
       });
     }else if(p.tecPeca){
       pecasState[_pid].tec.cavs = String(p.tecPeca).split('|').map(function(parte){
         const limpo=parte.trim().replace(/^\d+\)\s*/,'');
-        if(/^Outros\s*—/.test(limpo)) return { solido:'Outros', m:['','','',''], outros:limpo.replace(/^Outros\s*—\s*/,'') };
+        if(/^Outros\s*—/.test(limpo)) return { solido:'Outros', m:_medVazias(), outros:limpo.replace(/^Outros\s*—\s*/,'') };
         const d=_destrincharTec(limpo,_MED_PECA);
-        const m=['','','',''];
-        (d.valores||[]).forEach(function(v,k){ if(k<4) m[k]=v; });
+        const m=_medVazias();
+        (d.valores||[]).forEach(function(v,k){ if(k<m.length) m[k]=v; });
         return { solido:d.forma, m:m, outros:'' };
       }).filter(function(c){ return !!c.solido; });
     }
