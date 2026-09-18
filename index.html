@@ -605,8 +605,8 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v52';
-const APP_DATA='11/09/2026';
+const APP_VERSAO='v53';
+const APP_DATA='18/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
 let SHEET_URL=localStorage.getItem('petro_sheetUrl')||SHEET_URL_PADRAO;
@@ -4527,6 +4527,13 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       if(c.pecas) c.pecas=c.pecas.map(function(p){
         var pp=Object.assign({}, p);
         if('desenhoFoto' in pp) pp.desenhoFoto='';
+        /* A FOTO DA PEÇA — 18/09/2026. Era a única imagem que não saía daqui.
+           Nove fotos encheram o documento até o limite de 1 MB em 28/08, e a
+           partir daí TODA gravação foi recusada, em silêncio: o tempo real
+           morreu e os aparelhos passaram a se atualizar só pela planilha, a
+           cada 90 s. A foto já mora no Storage (slot p0-foto-0) e o módulo de
+           fotos a devolve em cada aparelho — aqui ela só pesava. */
+        if('fotosPeca' in pp) pp.fotosPeca=[];
         if(pp.ponteiras) pp.ponteiras=pp.ponteiras.map(function(x){var y=Object.assign({},x);y.foto='';return y;});
         if(pp.furos) pp.furos=pp.furos.map(function(x){var y=Object.assign({},x);y.foto='';return y;});
         return pp;
@@ -4543,6 +4550,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       if(r.pecas && lr.pecas) r.pecas.forEach(function(p,i){
         var lp=lr.pecas[i]; if(!lp) return;
         if((!p.desenhoFoto)&&lp.desenhoFoto) p.desenhoFoto=lp.desenhoFoto;
+        if((!p.fotosPeca||!p.fotosPeca.length)&&lp.fotosPeca&&lp.fotosPeca.length) p.fotosPeca=lp.fotosPeca;
         if(p.ponteiras&&lp.ponteiras) p.ponteiras.forEach(function(x,j){ if((!x.foto)&&lp.ponteiras[j]&&lp.ponteiras[j].foto) x.foto=lp.ponteiras[j].foto; });
         if(p.furos&&lp.furos) p.furos.forEach(function(x,j){ if((!x.foto)&&lp.furos[j]&&lp.furos[j].foto) x.foto=lp.furos[j].foto; });
       });
@@ -4567,8 +4575,11 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       try{ localStorage.setItem(KEY, JSON.stringify(mergedReceb)); }catch(e){}
       _setTumbas(mergedTumbas);
       _fbAplicando=false;
-      fdoc.set({ payload: JSON.stringify({ receb:_semFotos(mergedReceb), _tumbas:mergedTumbas }), updatedAt: Date.now() })
-        .catch(function(e){ console.warn('[Firebase] envio erro', e); });
+      var _pl=JSON.stringify({ receb:_semFotos(mergedReceb), _tumbas:mergedTumbas });
+      _fbAvisarTamanho(_pl);
+      fdoc.set({ payload: _pl, updatedAt: Date.now() })
+        .then(function(){ _fbFalhou=false; })
+        .catch(function(e){ console.warn('[Firebase] envio erro', e); _fbAvisarFalha(); });
       if(typeof renderSaved==='function' && _sig(mergedReceb)!==_sig(receb)) renderSaved();
     }).catch(function(){
       // se não conseguiu ler a nuvem, grava direto (comportamento antigo) para não travar
@@ -4576,6 +4587,25 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
     });
   }
   function _fbAgendar(){ clearTimeout(_fbTimer); _fbTimer=setTimeout(_fbEnviar, 1200); }
+
+  /* FALHA QUE SE MOSTRA — 18/09/2026. O `catch` só escrevia no console, e o
+     sincronismo ficou três semanas parado sem ninguém ver: a planilha seguia
+     entregando as fichas, só que com atraso, e o atraso parecia lentidão.
+     Agora a falha aparece uma vez na tela, e o documento avisa antes de
+     chegar ao limite do Firestore (1 MB). */
+  var _fbFalhou=false;
+  function _fbAvisarFalha(){
+    if(_fbFalhou) return; _fbFalhou=true;
+    if(typeof toast==='function') toast('⚠️ Sincronização entre aparelhos falhou. As fichas seguem pela planilha, com atraso. Avise a Suzana.');
+  }
+  function _fbAvisarTamanho(txt){
+    var kb=Math.round(txt.length/1024);
+    if(kb>800){
+      console.error('[Firebase] documento de sincronização com '+kb+' KB — o limite é 1024 KB');
+      if(typeof toast==='function') toast('⚠️ Sincronização perto do limite ('+kb+' KB de 1024). Avise a Suzana.');
+    }
+  }
+  window._fbTamanhoPayload=function(){ return Math.round(JSON.stringify({receb:_semFotos(_getReceb()),_tumbas:_getTumbas()}).length/1024); };
 
   // carimba updatedAt e agenda envio nas ações locais
   if(typeof window.salvarLocal==='function'){
