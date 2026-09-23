@@ -605,8 +605,8 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v53';
-const APP_DATA='18/09/2026';
+const APP_VERSAO='v54';
+const APP_DATA='23/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
 let SHEET_URL=localStorage.getItem('petro_sheetUrl')||SHEET_URL_PADRAO;
@@ -2327,7 +2327,7 @@ function salvarFicha(enviarDepois){
 }
 // ============ ENVIO POR E-MAIL (destino + anexo) ============
 const AREAS={comercial:{nome:'Comercial'},orcamento:{nome:'Orçamento'},admissao:{nome:'Admissão / Produção'},cliente:{nome:'Cliente'}};
-let _enviarId=null,_enviarDestino='comercial',_enviarPrimeiro=false;
+let _enviarId=null,_enviarDestino='comercial',_enviarPrimeiro=false,_enviarEtapaAtual='comercial';
 /* O ORÇAMENTO (Fábio) não entra no fluxo da admissão — 26/08/2026.
    Pedido da Suzana: quando o Emerson dá entrada numa admissão, o Fábio recebia
    e-mail. Ele só deve entrar quando o comercial manda para o orçamento.
@@ -2352,6 +2352,7 @@ function openEnviar(id){
   if(!d){toast('Recebimento não encontrado');return;}
   _enviarId=id;
   _enviarPrimeiro=!d.jaEnviado;
+  _enviarEtapaAtual=d.etapa||'comercial';   // onde a ficha está AGORA — ver _atualizaEnvEmailInfo
   document.getElementById('enviarInfo').textContent=(d.cliente||'—')+(d.nf?(' · NF '+d.nf):'')+' · '+((d.pecas&&d.pecas.length)||0)+' peça(s)';
   document.getElementById('envEmailCliente').value=_getCliEmail(d.cliente);
   var chk=document.getElementById('envAnexo'), fixo=document.getElementById('envAnexoFixo');
@@ -2466,7 +2467,21 @@ function _selEnvDestino(a){
 }
 function _atualizaEnvEmailInfo(){
   var em=_emailDaArea(_enviarDestino);
-  document.getElementById('envEmailInfo').innerHTML= em? ('Vai para: <b>'+em+'</b>') : (_enviarDestino==='cliente'?'<span style="color:#C0392B">Digite o e-mail do cliente</span>':'<span style="color:#C0392B">Sem e-mail configurado para esta área (⚙️)</span>');
+  var txt= em? ('Vai para: <b>'+em+'</b>') : (_enviarDestino==='cliente'?'<span style="color:#C0392B">Digite o e-mail do cliente</span>':'<span style="color:#C0392B">Sem e-mail configurado para esta área (⚙️)</span>');
+  /* ═══ ENVIAR PARA A PRÓPRIA ETAPA NÃO FAZ A FICHA ANDAR — 23/09/2026 ══════
+     O Fábio relatou que enviava o orçamento e ele não chegava ao comercial.
+     A ficha que está NO orçamento e ainda não tem molde/fórmula/peso/preço
+     preenchidos abre esta janela com "Orçamento" já marcado — ele confirmava,
+     o app dizia "Enviado para Orçamento ✓" e a ficha continuava parada com
+     ele. O e-mail ia para o endereço do próprio orçamento.
+     O destino padrão não muda (quem devolve ficha para a própria área existe:
+     é o comercial pedindo o custo). O que muda é que agora está ESCRITO. */
+  if(_enviarDestino!=='cliente'&&_enviarDestino===_enviarEtapaAtual){
+    txt+='<div style="color:#C0392B;font-weight:700;margin-top:6px">⚠️ Esta ficha JÁ está em '+
+         AREAS[_enviarDestino].nome+'. Enviando assim ela continua parada aí.'+
+         (_enviarDestino==='orcamento'?' Para devolver ao comercial, escolha <b>Comercial</b>.':'')+'</div>';
+  }
+  document.getElementById('envEmailInfo').innerHTML=txt;
 }
 /* Prefixo do assunto do e-mail, para dar de bater o olho na caixa de entrada
    em que ponto do fluxo o recebimento está. Definido com a Suzana em 18/08/2026.
@@ -2482,7 +2497,19 @@ function confirmarEnviar(){
   var d=(LISTA_ATUAL||[]).find(function(a){return String(a.id)===String(id);})||JSON.parse(localStorage.getItem('petro_receb')||'[]').find(function(a){return String(a.id)===String(id);});
   if(!d){toast('Recebimento não encontrado');return;}
   var to=_emailDaArea(dest);
-  if(!to){toast(dest==='cliente'?'Digite o e-mail do cliente':'Configure o e-mail em ⚙️');return;}
+  /* SEM ENDEREÇO, NADA SAI — e o aviso precisa dizer QUAL área está sem ele.
+     ⚠️ O e-mail do comercial pode ficar vazio sem estar em branco: o app tira
+     dele o endereço do orçamento (ver _semEmailDoOrcamento), então quem digitar
+     o endereço do orçamento no campo do comercial fica sem destino nenhum. */
+  if(!to){
+    toast(dest==='cliente'?'Digite o e-mail do cliente'
+      :('Sem e-mail do '+AREAS[dest].nome+' neste aparelho — preencha em ⚙️ e envie de novo'));
+    return;
+  }
+  var _mesmaEtapa=(dest!=='cliente'&&dest===(d.etapa||'comercial'));
+  if(_mesmaEtapa&&!confirm('Esta ficha JÁ está em '+AREAS[dest].nome+'.\n\n'+
+      'Enviando assim ela CONTINUA PARADA aí'+(dest==='orcamento'?' e não vai para o comercial':'')+'.\n\n'+
+      'Enviar mesmo assim?'))return;
   if(dest==='cliente'){ if(!/.+@.+\..+/.test(to)){toast('E-mail do cliente inválido');return;} _setCliEmail(d.cliente,to); }
   var anexar=document.getElementById('envAnexo').checked;
   var _etapaAnt=d.etapa||'comercial'; // capturar ANTES de trocar a etapa abaixo
@@ -3108,6 +3135,18 @@ function _marcarPdfEnviado(id){
 function orcamentoPronto(id){
   var d=(LISTA_ATUAL||[]).find(function(a){return String(a.id)===String(id);})||JSON.parse(localStorage.getItem('petro_receb')||'[]').find(function(a){return String(a.id)===String(id);});
   if(!d){toast('Recebimento não encontrado');return;}
+  /* ORÇAMENTO EM BRANCO — 23/09/2026. Devolver sem molde/fórmula/peso/preço é
+     mandar o comercial esperar de novo. Não trava (há caso de devolver por não
+     ter como orçar), mas pergunta. */
+  var _cheio=(d.pecas||[]).some(function(p){return !!(p&&(p.molde||p.formula||p.pesoOrc||p.preco||p.garantia));});
+  if(!_cheio&&!confirm('O orçamento desta ficha está EM BRANCO (sem molde, fórmula, peso nem preço).\n\n'+
+     'Se você preencheu agora, feche isto, toque em Salvar e devolva de novo.\n\nDevolver assim mesmo?'))return;
+  /* O endereço tem de ser o EFETIVO: o app tira o e-mail do orçamento da lista
+     do comercial, então `EMAIL_COM` pode estar preenchido e o destino, vazio —
+     e o e-mail saía sem destinatário nenhum, calado. */
+  var _paraCom=_emailDaArea('comercial');
+  if(!_paraCom&&!confirm('Não há e-mail do Comercial neste aparelho (⚙️).\n\n'+
+     'A ficha volta para a fila do comercial, mas ninguém recebe aviso por e-mail.\n\nContinuar?'))return;
   if(!confirm('Marcar o ORÇAMENTO como pronto e DEVOLVER ao comercial?'))return;
   var now=Date.now();
   /* Devolve para a fila do Comercial, não só avisa por e-mail.
@@ -3119,8 +3158,8 @@ function orcamentoPronto(id){
   try{localStorage.setItem('petro_receb',JSON.stringify(arr));}catch(e){}
   (LISTA_ATUAL||[]).forEach(function(a){if(String(a.id)===String(id)){a.orcPronto=true;a.orcProntoEm=now;a.etapa='comercial';a.etapaEm=now;a.updatedAt=now;}});
   if(SHEET_URL)postSheet(SHEET_URL,{action:'etapa',id:id,etapa:'comercial'}); // grava a volta na planilha
-  if(SHEET_URL&&EMAIL_COM){
-    postSheet(SHEET_URL,{action:'email',id:id,to:_emailDaArea('comercial'),
+  if(SHEET_URL&&_paraCom){
+    postSheet(SHEET_URL,{action:'email',id:id,to:_paraCom,
       assunto:'CUSTO FINALIZADO — '+_tituloFicha(d),
       resumo:'O orçamento foi preenchido e está pronto para lançar no Naphta:\n\n'+_resumoOrc(d)});
   }
@@ -3573,6 +3612,7 @@ function filtrarLista(){
         <button class="ic" title="Abrir o PDF na tela (com opção de imprimir)" style="color:#C0392B;font-weight:800;font-size:12px" onclick="verPDF('${d.id}')">PDF</button>
         <button class="ic" title="Salvar / sincronizar (sem enviar)" onclick="salvarLinha('${d.id}')">💾</button>
         <button class="ic" title="Enviar por e-mail" style="color:#1F618D;font-weight:800" onclick="openEnviar('${d.id}')">📧</button>
+        ${etapa==='orcamento'?`<button class="ic" title="Orçamento pronto — devolver ao comercial" style="color:#1e9e54;font-weight:800;font-size:12px" onclick="orcamentoPronto('${d.id}')">➡ COM</button>`:''}
         ${concl?`<button class="ic" title="Reabrir (voltar para pendente)" onclick="reabrir('${d.id}')">↩️</button>`:`<button class="ic icok" title="Concluir (atendido)" onclick="marcarAtendido('${d.id}')">✔️</button>`}
         <button class="ic icdel" title="Excluir" onclick="excluirRec('${d.id}')">🗑</button>
       </div></div>`;
