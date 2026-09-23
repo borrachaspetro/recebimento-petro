@@ -605,7 +605,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v54';
+const APP_VERSAO='v55';
 const APP_DATA='23/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -2358,17 +2358,20 @@ function openEnviar(id){
   var chk=document.getElementById('envAnexo'), fixo=document.getElementById('envAnexoFixo');
   if(_enviarPrimeiro){ chk.checked=true; chk.disabled=true; fixo.style.display='block'; }
   else { chk.checked=false; chk.disabled=false; fixo.style.display='none'; }
-  /* DESTINO PADRÃO (25/08/2026)
-     Antes o destino já vinha marcado na PRÓPRIA etapa do recebimento: um item em
-     Orçamento abria com "Orçamento" selecionado. Quem acabava de orçar e só
-     conferia antes de tocar Enviar devolvia o item para a própria fila — ele
-     nunca saía de "Pendente Orçamento". Agora, se a etapa é Orçamento e o
-     orçamento JÁ está preenchido (molde/fórmula/peso/preço em alguma peça), o
-     padrão passa a ser Comercial, que é para onde o trabalho segue. */
-  var _orcFeito=((d.pecas||[]).some(function(p){return !!(p&&(p.molde||p.formula||p.pesoOrc||p.preco||p.garantia));}));
-  var destino=_enviarPrimeiro?'comercial'
-    :((d.etapa==='orcamento'&&_orcFeito)?'comercial'
-    :((d.etapa==='admissao'||d.etapa==='comercial'||d.etapa==='orcamento')?d.etapa:'comercial'));
+  /* DESTINO PADRÃO — REFEITO EM 23/09/2026 (decisão da Suzana)
+     Regra: a ficha que está no ORÇAMENTO ou voltou para a ADMISSÃO abre sempre
+     com COMERCIAL marcado. É para lá que o trabalho segue nos dois casos.
+
+     ⚠️ O QUE NÃO PODE VOLTAR A ACONTECER, e por que a regra antiga errava:
+     até a v53 o padrão só virava Comercial se o orçamento estivesse preenchido
+     (molde/fórmula/peso/preço). Mas PARTE desses campos já chega preenchida ao
+     Fábio — a ficha só vai parar nele depois de passar pelas etapas anteriores.
+     Quando nenhum deles estava preenchido, a janela abria com "Orçamento"
+     marcado: ele confirmava, o app dizia "Enviado para Orçamento ✓", o e-mail
+     ia para o endereço do próprio orçamento e a ficha ficava parada com ele.
+     O envio NÃO depende mais de campo preenchido, em lugar nenhum: preencher é
+     decisão de quem orça, não condição para a ficha andar. */
+  var destino='comercial';   // o comercial é o dono do pedido: toda ficha volta para ele
   _selEnvDestino(destino);
   document.getElementById('enviarModal').classList.add('show');
 }
@@ -2465,6 +2468,15 @@ function _selEnvDestino(a){
   document.getElementById('envClienteBox').classList.toggle('hide',a!=='cliente');
   _atualizaEnvEmailInfo();
 }
+/* A FICHA VAI FICAR PARADA ONDE ESTÁ? — 23/09/2026
+   Só é erro nas duas etapas em que alguém está ESPERANDO o trabalho seguir: o
+   orçamento e a admissão que recebeu a ficha de volta para corrigir. Mandar
+   para o COMERCIAL uma ficha que já está no comercial é rotina — é o reenvio
+   do e-mail para quem toca o pedido —, e avisar ali seria barulho em cima de
+   quem não errou. */
+function _ficaParada(dest,etapaAtual){
+  return dest===etapaAtual && (dest==='orcamento'||dest==='admissao');
+}
 function _atualizaEnvEmailInfo(){
   var em=_emailDaArea(_enviarDestino);
   var txt= em? ('Vai para: <b>'+em+'</b>') : (_enviarDestino==='cliente'?'<span style="color:#C0392B">Digite o e-mail do cliente</span>':'<span style="color:#C0392B">Sem e-mail configurado para esta área (⚙️)</span>');
@@ -2476,7 +2488,7 @@ function _atualizaEnvEmailInfo(){
      ele. O e-mail ia para o endereço do próprio orçamento.
      O destino padrão não muda (quem devolve ficha para a própria área existe:
      é o comercial pedindo o custo). O que muda é que agora está ESCRITO. */
-  if(_enviarDestino!=='cliente'&&_enviarDestino===_enviarEtapaAtual){
+  if(_ficaParada(_enviarDestino,_enviarEtapaAtual)){
     txt+='<div style="color:#C0392B;font-weight:700;margin-top:6px">⚠️ Esta ficha JÁ está em '+
          AREAS[_enviarDestino].nome+'. Enviando assim ela continua parada aí.'+
          (_enviarDestino==='orcamento'?' Para devolver ao comercial, escolha <b>Comercial</b>.':'')+'</div>';
@@ -2506,8 +2518,11 @@ function confirmarEnviar(){
       :('Sem e-mail do '+AREAS[dest].nome+' neste aparelho — preencha em ⚙️ e envie de novo'));
     return;
   }
-  var _mesmaEtapa=(dest!=='cliente'&&dest===(d.etapa||'comercial'));
-  if(_mesmaEtapa&&!confirm('Esta ficha JÁ está em '+AREAS[dest].nome+'.\n\n'+
+  /* Pergunta só quando o envio deixaria a ficha parada onde já está (orçamento
+     ou admissão). Não é trava do trabalho dele: o padrão é Comercial, então
+     isto só aparece se a pessoa escolher a própria etapa de propósito. */
+  if(_ficaParada(dest,d.etapa||'comercial')&&
+     !confirm('Esta ficha JÁ está em '+AREAS[dest].nome+'.\n\n'+
       'Enviando assim ela CONTINUA PARADA aí'+(dest==='orcamento'?' e não vai para o comercial':'')+'.\n\n'+
       'Enviar mesmo assim?'))return;
   if(dest==='cliente'){ if(!/.+@.+\..+/.test(to)){toast('E-mail do cliente inválido');return;} _setCliEmail(d.cliente,to); }
@@ -3135,12 +3150,10 @@ function _marcarPdfEnviado(id){
 function orcamentoPronto(id){
   var d=(LISTA_ATUAL||[]).find(function(a){return String(a.id)===String(id);})||JSON.parse(localStorage.getItem('petro_receb')||'[]').find(function(a){return String(a.id)===String(id);});
   if(!d){toast('Recebimento não encontrado');return;}
-  /* ORÇAMENTO EM BRANCO — 23/09/2026. Devolver sem molde/fórmula/peso/preço é
-     mandar o comercial esperar de novo. Não trava (há caso de devolver por não
-     ter como orçar), mas pergunta. */
-  var _cheio=(d.pecas||[]).some(function(p){return !!(p&&(p.molde||p.formula||p.pesoOrc||p.preco||p.garantia));});
-  if(!_cheio&&!confirm('O orçamento desta ficha está EM BRANCO (sem molde, fórmula, peso nem preço).\n\n'+
-     'Se você preencheu agora, feche isto, toque em Salvar e devolva de novo.\n\nDevolver assim mesmo?'))return;
+  /* ⚠️ NÃO PERGUNTE SE O ORÇAMENTO ESTÁ EM BRANCO — decisão da Suzana, 23/09.
+     Parte dos campos já chega preenchida da etapa anterior, e o que falta é
+     decisão de quem orça. A ficha tem de andar sempre que ele mandar; nada
+     aqui pode depender de campo preenchido. */
   /* O endereço tem de ser o EFETIVO: o app tira o e-mail do orçamento da lista
      do comercial, então `EMAIL_COM` pode estar preenchido e o destino, vazio —
      e o e-mail saía sem destinatário nenhum, calado. */
