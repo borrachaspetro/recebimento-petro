@@ -605,8 +605,8 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v55';
-const APP_DATA='23/09/2026';
+const APP_VERSAO='v56';
+const APP_DATA='29/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
 let SHEET_URL=localStorage.getItem('petro_sheetUrl')||SHEET_URL_PADRAO;
@@ -652,6 +652,62 @@ bindChipsSingle('servico','servico','servicoDesc',['Outros'],function(){ aplicar
    tem diâmetro. Uma tabela só, em vez de campo fixo com nome genérico, é o
    que impede a ficha de pedir "medida B" e receber qualquer número.
    Para acrescentar uma forma nova, basta uma linha aqui.                   */
+/* ═══ DIFICULDADE PARA RETIRAR O ACESSÓRIO — 29/09/2026 ═══════════════════
+   Pedido da Suzana. Saber que a peça tem quatro parafusos não diz quanto
+   trabalho ela dá: o que decide é a dificuldade de TIRAR cada um. A Petro
+   trabalha com três níveis, mais um quarto que ela não faz aqui.
+
+   Os minutos são POR ACESSÓRIO e servem para estimar, não para cobrar: o app
+   multiplica pela quantidade e mostra o total, que segue na ficha, no e-mail e
+   no PDF — é essa informação que hoje se perde entre a admissão e quem orça.
+
+   ⚠️ O nível 4 não tem tempo porque não é trabalho da Petro: vai para empresa
+   de fora. Somar zero seria dizer que não custa nada; por isso ele aparece
+   como aviso à parte, não como minuto.
+   Para mudar tempo ou incluir nível, é só mexer aqui.                      */
+const _NIVEIS_ACESS={
+  '1':{rotulo:'Nível 1 — fácil',          min:10},
+  '2':{rotulo:'Nível 2 — intermediário',  min:20},
+  '3':{rotulo:'Nível 3 — difícil',        min:30},
+  '4':{rotulo:'Nível 4 — fora da Petro (empresa terceirizada)', min:0, fora:true}
+};
+/* Lê as linhas de acessório DA TELA de uma peça: nome, quantidade e nível. */
+function _acessDoForm(pe){
+  var out=[];
+  (pe?pe.querySelectorAll('.acessqtd'):[]).forEach(function(row){
+    var q=row.querySelector('.xq'), n=row.querySelector('.xn');
+    out.push({ nome:row.getAttribute('data-xk')||'',
+               qtd:(q?q.value.trim():''), nivel:(n?n.value:'') });
+  });
+  return out;
+}
+/* Soma o tempo de retirada. Quantidade em branco conta como 1: o acessório
+   existe, alguém vai ter de tirar — dar zero esconderia trabalho. */
+function _tempoAcess(itens){
+  var min=0, fora=[];
+  (itens||[]).forEach(function(it){
+    var nv=_NIVEIS_ACESS[it.nivel]; if(!nv)return;
+    if(nv.fora){ fora.push(it.nome); return; }
+    var q=parseInt(String(it.qtd||'').replace(/\D/g,''),10); if(!q||q<1)q=1;
+    min+=nv.min*q;
+  });
+  return { min:min, fora:fora };
+}
+function _somaAcess(pe){
+  var box=pe?pe.querySelector('.acessTotal'):null; if(!box)return;
+  var t=_tempoAcess(_acessDoForm(pe)), txt='';
+  if(t.min>0) txt='⏱ Tempo estimado para retirar: <b>'+_horas(t.min)+'</b>';
+  if(t.fora.length) txt+=(txt?'<br>':'')+
+    '<span style="color:#C0392B;font-weight:700">'+t.fora.join(', ')+
+    ': fora da Petro — precisa de empresa terceirizada</span>';
+  box.innerHTML=txt;
+}
+/* "80" → "1 h 20". Minuto solto vira conta na cabeça de quem lê. */
+function _horas(min){
+  min=Math.round(min||0); if(min<=0)return '';
+  var h=Math.floor(min/60), m=min%60;
+  return h? (h+' h'+(m?(' '+String(m).padStart(2,'0')):'')) : (m+' min');
+}
 const _MED_MATRIZ={
   'Quadrada':   ['Lado (mm)','Altura (mm)'],
   'Retangular': ['Comprimento (mm)','Largura (mm)','Altura (mm)'],
@@ -1467,6 +1523,7 @@ function addPeca(){
       </div>
       <input type="text" class="p_acessoutros desc hide" placeholder="Qual acessório? Descrever…">
       <div class="acessQtds"></div>
+      <div class="acessTotal hint" style="margin-top:2px"></div>
     </div>
     </div><!-- /data-blk=acess -->
 
@@ -1734,13 +1791,26 @@ function addPeca(){
         const row=document.createElement('div');
         row.className='row acessqtd'; row.setAttribute('data-xk',nome);
         row.style.alignItems='center'; row.style.marginBottom='8px';
+        /* Nome · Qtd · Dificuldade para RETIRAR. A dificuldade é por acessório:
+           o mesmo recebimento pode ter parafuso fácil e mancal que nem sai aqui. */
         row.innerHTML='<div style="flex:2;font-weight:700;font-size:13px;color:#333">'+nome+'</div>'+
-          '<div style="flex:1"><input type="text" inputmode="numeric" class="xq" data-xk="'+nome+'" placeholder="Qtd" style="margin-bottom:0"></div>';
+          '<div style="flex:1"><input type="text" inputmode="numeric" class="xq" data-xk="'+nome+'" placeholder="Qtd" style="margin-bottom:0"></div>'+
+          '<div style="flex:2"><select class="xn" data-xk="'+nome+'" style="margin-bottom:0">'+
+            '<option value="">Dificuldade p/ retirar…</option>'+
+            Object.keys(_NIVEIS_ACESS).map(function(k){
+              return '<option value="'+k+'">'+_NIVEIS_ACESS[k].rotulo+
+                     (_NIVEIS_ACESS[k].fora?'':(' · '+_NIVEIS_ACESS[k].min+' min cada'))+'</option>';
+            }).join('')+
+          '</select></div>';
         acessQtds.appendChild(row);
         addNAbutton(row.querySelector('.xq'));
+        row.querySelector('.xq').addEventListener('input',function(){_somaAcess(div);});
+        row.querySelector('.xn').addEventListener('change',function(){_somaAcess(div);});
+        _somaAcess(div);
       }else{
         pecasState[id].acessSet.delete(nome);
         const ex=acessQtds.querySelector('.acessqtd[data-xk="'+nome+'"]'); if(ex)ex.remove();
+        _somaAcess(div);
       }
       if(nome==='Outros'){ const of=div.querySelector('.p_acessoutros'); if(of)of.classList.toggle('hide',!c.classList.contains('on')); }
     };
@@ -2077,13 +2147,30 @@ function coletarPecas(){
     if(acessSN==='Sim'){
       pecasState[id].acessSet.forEach(nome=>{
         const inp=p.querySelector('.xq[data-xk="'+nome+'"]');
+        const sel=p.querySelector('.xn[data-xk="'+nome+'"]');
         const qt=inp?inp.value.trim():'';
+        const nv=sel?sel.value:'';
         let label=(nome==='Outros'&&acessOutros)?('Outros: '+acessOutros):nome;
-        acessItens.push({nome:nome,qtd:qt});
-        acessParts.push(label+(qt?' ('+qt+')':''));
+        acessItens.push({nome:nome,qtd:qt,nivel:nv});
+        /* O nível vai DENTRO do texto, ao lado do acessório. A planilha guarda
+           uma coluna só de acessórios: separar em coluna nova obrigaria a mexer
+           no cabeçalho e nas fichas antigas, e o que quem lê precisa é ver, na
+           mesma linha, qual acessório dá qual trabalho. */
+        /* ⚠️ O formato é [nível N · …] de propósito: os acessórios são separados
+           por vírgula no mesmo campo, então nada aqui dentro pode ter vírgula,
+           ou a ficha que volta da planilha se desmonta errado. */
+        const nvT=_NIVEIS_ACESS[nv]
+          ? (' [nível '+nv+' · '+(_NIVEIS_ACESS[nv].fora?'fora da Petro':(_NIVEIS_ACESS[nv].min+' min cada'))+']')
+          : '';
+        acessParts.push(label+(qt?' ('+qt+')':'')+nvT);
       });
     }
-    const acess=acessParts.join(', ');
+    /* O total fecha a conta para quem orça: acessório por acessório é
+       informação; o tempo somado é o que entra na decisão. */
+    const _tAc=_tempoAcess(acessItens);
+    let acess=acessParts.join(', ');
+    if(acess&&_tAc.min>0) acess+=' · Tempo estimado para retirar: '+_horas(_tAc.min);
+    if(acess&&_tAc.fora.length) acess+=' · FORA DA PETRO (empresa terceirizada): '+_tAc.fora.join(', ');
     // ---- inspeção visual ----
     const st=pecasState[id];
     const ptSN=st.ptSN||'', fcSN=st.fcSN||'';
@@ -3948,7 +4035,21 @@ function carregarParaEditar(id){
     if(ad.outros!=null){set('p_acaboutros',ad.outros);}
     // ---- acessórios ----
     let acItens=p.acessDados||[];
-    if((!acItens||!acItens.length)&&p.acess){acItens=p.acess.split(',').map(s=>{s=s.trim();const m=s.match(/^(.*?)\s*\((\d+)\)$/);return m?{nome:m[1].trim(),qtd:m[2]}:{nome:s,qtd:''};}).filter(x=>x.nome);}
+    /* DA PLANILHA VOLTA SÓ O TEXTO. Sem desmontar aqui, a tela abriria sem o
+       nível e o próximo salvamento gravaria vazio por cima — o mesmo jeito como
+       o friso e o produto sumiram por semanas neste app. O resumo do fim
+       ("Tempo estimado…", "FORA DA PETRO…") é conta, não acessório: sai antes. */
+    if((!acItens||!acItens.length)&&p.acess){
+      acItens=String(p.acess)
+        .split(/\s·\s(?:Tempo estimado|FORA DA PETRO)/)[0]
+        .split(',').map(s=>{
+          s=s.trim(); if(!s)return null;
+          const nv=s.match(/\[n[íi]vel\s*(\d)[^\]]*\]/i);
+          if(nv) s=s.replace(nv[0],'').trim();
+          const m=s.match(/^(.*?)\s*\((\d+)\)$/);
+          return { nome:(m?m[1]:s).trim(), qtd:(m?m[2]:''), nivel:(nv?nv[1]:'') };
+        }).filter(x=>x&&x.nome);
+    }
     /* ACESSÓRIO "OUTROS" — 25/08/2026
        Na planilha o item vira "Outros: manopla (2)". Ao voltar, o nome lido era
        "Outros: manopla", que não casa com nenhum chip (data-xv="Outros"): o chip
@@ -3958,12 +4059,20 @@ function carregarParaEditar(id){
     var _acessOutros='';
     acItens=(acItens||[]).map(function(it){
       var mo=String(it&&it.nome||'').match(/^Outros\s*:\s*(.+)$/i);
-      if(mo){ _acessOutros=mo[1].trim(); return {nome:'Outros',qtd:it.qtd||''}; }
+      if(mo){ _acessOutros=mo[1].trim(); return {nome:'Outros',qtd:it.qtd||'',nivel:it.nivel||''}; }
       return it;
     });
     var _acess=p.acessSN||((acItens&&acItens.length)?'Sim':'Não'); // sem acessório na planilha = a resposta foi Não
     {const b=[].slice.call(pe.querySelectorAll('.acessseg button')).find(x=>x.dataset.v===_acess);if(b)b.click();}
-    (acItens||[]).forEach(it=>{const c=[].slice.call(pe.querySelectorAll('.xchip')).find(x=>x.dataset.xv===it.nome);if(c&&!c.classList.contains('on')){c.click();const i=pe.querySelector('.xq[data-xk="'+it.nome+'"]');if(i)i.value=it.qtd||'';}});
+    (acItens||[]).forEach(it=>{
+      const c=[].slice.call(pe.querySelectorAll('.xchip')).find(x=>x.dataset.xv===it.nome);
+      if(c&&!c.classList.contains('on')){
+        c.click();
+        const i=pe.querySelector('.xq[data-xk="'+it.nome+'"]'); if(i)i.value=it.qtd||'';
+        const s=pe.querySelector('.xn[data-xk="'+it.nome+'"]'); if(s)s.value=it.nivel||'';
+      }
+    });
+    _somaAcess(pe);   // refaz o total com o que voltou
     set('p_acessoutros',_v(p.acessOutros)||_acessOutros);
     // ---- inspeção visual ----
     const pid=+pe.id.split('-')[1];
