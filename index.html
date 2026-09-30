@@ -605,7 +605,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v57';
+const APP_VERSAO='v58';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -4605,6 +4605,67 @@ try{
     });
   }
 }catch(e){ console.warn('[Petro] PWA:',e); }
+
+/* ═══ A FAIXA DE VERSÃO NOVA — 30/09/2026 ══════════════════════════════════
+   Igual à do Sistema da Qualidade e à do PCP; o Recebimento era o único dos
+   três sem ela. Até aqui, toda publicação terminava com alguém pedindo no
+   WhatsApp "dá Ctrl+Shift+R" — e quem não visse a mensagem seguia registrando
+   na versão velha sem saber.
+
+   ⚠️ CONFERE O sw.js, NÃO O index.html. O número da versão está nos dois, mas
+   o index tem 366 KB e o sw.js tem 5 KB: perguntar de meia em meia hora pelo
+   arquivo grande seria gastar a internet do celular de quem está no balcão.
+
+   ⚠️ NUNCA recarrega sozinho. Quem está com uma ficha digitada pela metade
+   perderia tudo. A faixa espera o toque, e tem "Agora não".                */
+function faixaVersaoNova(nova){
+  if(document.getElementById('faixaVer'))return;
+  var b=document.createElement('div');
+  b.id='faixaVer';
+  /* Fica ACIMA da barra de Salvar/Enviar, medindo a altura dela na hora:
+     tapar os dois botões do rodapé seria trocar um problema por outro. */
+  var fb=document.querySelector('.footer-bar');
+  var alt=fb?Math.round(fb.getBoundingClientRect().height):0;
+  b.style.cssText='position:fixed;left:0;right:0;bottom:'+alt+'px;z-index:70;background:#FFCC00;'+
+    'color:#000;padding:10px 14px;display:flex;gap:10px;align-items:center;justify-content:center;'+
+    'flex-wrap:wrap;font-weight:600;font-size:13px;box-shadow:0 -2px 10px rgba(0,0,0,.25)';
+  b.innerHTML='Existe uma versão nova do app ('+nova+'). Você está na '+APP_VERSAO+'.'+
+    ' <button type="button" onclick="atualizarApp()" style="background:#000;color:#fff;border:0;'+
+    'border-radius:6px;padding:7px 14px;font-weight:700;cursor:pointer">Atualizar agora</button>'+
+    ' <button type="button" onclick="document.getElementById(\'faixaVer\').remove()" '+
+    'style="background:transparent;border:1px solid #000;border-radius:6px;padding:7px 12px;'+
+    'cursor:pointer">Agora não</button>';
+  document.body.appendChild(b);
+}
+function atualizarApp(){
+  var fim=function(){ location.reload(); };
+  try{
+    if(window.caches&&caches.keys){
+      caches.keys().then(function(ns){
+        return Promise.all(ns.map(function(n){ return caches.delete(n); }));
+      }).then(fim,fim);
+    }else fim();
+  }catch(e){ fim(); }
+}
+function conferirVersaoPublicada(){
+  if(typeof navigator!=='undefined'&&navigator.onLine===false)return;   // sem internet, não adianta
+  try{
+    fetch('sw.js?nc='+Date.now(),{cache:'no-store'})
+      .then(function(r){ return r.text(); })
+      .then(function(t){
+        var m=t.match(/petro-recebimento-(v[\w.]+)/);
+        if(m&&m[1]&&m[1]!==APP_VERSAO)faixaVersaoNova(m[1]);
+      })
+      .catch(function(){});
+  }catch(e){}
+}
+setTimeout(conferirVersaoPublicada,20000);          // 20 s depois de abrir
+setInterval(conferirVersaoPublicada,30*60*1000);    // e de meia em meia hora
+window.addEventListener('focus',function(){
+  clearTimeout(window._tVer);
+  window._tVer=setTimeout(conferirVersaoPublicada,1500);
+});
+
 try{ atualizarClientes(); }catch(e){ console.error('[Petro] init atualizarClientes:',e); }
 // rede de segurança: se por qualquer motivo o item 7 ficou sem peça, cria uma
 try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){}
