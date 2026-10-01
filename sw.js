@@ -32,7 +32,7 @@
    mesmo APP_VERSAO do index.html. Isso apaga a cópia antiga dos aparelhos.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const CACHE_NOME = 'petro-recebimento-v58';
+const CACHE_NOME = 'petro-recebimento-v59';
 
 // O mínimo para o app abrir sem internet.
 const ESSENCIAIS = [
@@ -79,6 +79,14 @@ self.addEventListener('fetch', function (evento) {
      worker não se mete: essas chamadas precisam ir direto para a rede, e
      guardar respostas de outro domínio só traria confusão. */
   if (url.origin !== self.location.origin) return;
+
+  /* ---- O PRÓPRIO sw.js NUNCA sai da cópia guardada — 01/10/2026 ----------
+     A faixa "existe versão nova" pergunta a versão lendo este arquivo. Ele caía
+     na regra dos ícones, que entrega a cópia guardada primeiro: logo depois de
+     uma publicação, a página já era a nova e o sw.js lido ainda era o VELHO.
+     A faixa então anunciava como "nova" uma versão mais antiga que a aberta.
+     Aqui ele vai sempre para a rede. */
+  if (url.pathname.endsWith('sw.js')) return;
 
   // ---- A PÁGINA: rede primeiro, sempre. A cópia guardada é o plano B. ----
   if (req.mode === 'navigate' || url.pathname.endsWith('.html')) {
