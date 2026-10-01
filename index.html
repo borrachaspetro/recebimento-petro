@@ -608,7 +608,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v60';
+const APP_VERSAO='v61';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3487,11 +3487,22 @@ function _reparoEnviar(){
    A reserva existe porque leitura é a parte historicamente mais frágil deste
    app (foi ela que já prendeu a tela em "Carregando planilha…"). Nenhuma
    mudança aqui pode ter só um caminho. */
+/* QUANTO O APP ESPERA PELA PLANILHA — 01/10/2026
+   Era 14 s, e 14 s virou o problema. Medido daqui no mesmo dia: só a RECUSA do
+   /exec (quando o crachá não vai junto, e o script não chega a abrir a planilha)
+   leva 5 segundos. A leitura de verdade — 380 fichas, uma linha por peça, 63
+   colunas — acontece DEPOIS desses 5 s. A margem era de poucos segundos, e quem
+   ficava do lado errado dela via "Não conectou": o computador da Mari não
+   conectava e o do balcão, no mesmo minuto, lia normal.
+   Um app que espera 30 s e mostra o certo é melhor que um que desiste em 14 e
+   mostra dado de dois dias atrás. Com a faixa de lista velha avisando, a espera
+   maior não esconde nada de ninguém. */
+var _ESPERA_PLANILHA=30000;
 function _lerPorPost(){
   return _tokenLogin().then(function(tk){
     var corpo={action:'ler'}; if(CHAVE)corpo.k=CHAVE; if(tk)corpo.token=tk;
     var ctrl=(typeof AbortController!=='undefined')?new AbortController():null;
-    if(ctrl)setTimeout(function(){try{ctrl.abort();}catch(e){}},12000);
+    if(ctrl)setTimeout(function(){try{ctrl.abort();}catch(e){}},_ESPERA_PLANILHA-5000);
     return fetch(SHEET_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
       body:JSON.stringify(corpo),signal:ctrl?ctrl.signal:undefined});
   }).then(function(r){
@@ -3579,7 +3590,7 @@ function carregarNuvem(tent){
      pendurada para sempre ("⏳ Carregando planilha…" eterno). Este relógio garante
      que a falha silenciosa vire falha de verdade, com retentativa. */
   let _fim=false;
-  const _tmr=setTimeout(function(){ if(!_fim)_falhou(); },14000);
+  const _tmr=setTimeout(function(){ if(!_fim)_falhou(); },_ESPERA_PLANILHA);
   function _falhou(){
     _fim=true; clearTimeout(_tmr);
     const e=document.getElementById(cb+'_s'); if(e)e.remove();
@@ -4491,11 +4502,21 @@ function testarPlanilha(silencioso){
   if(s)s.innerHTML='<span class="status">⏳ Testando conexão…</span>';
   if(!silencioso)toast('Testando…');
   const cb='cbTeste_'+Date.now();
-  const tmr=setTimeout(function(){falhou();},15000);
+  /* O RELÓGIO DO TESTE — 01/10/2026
+     O botão dizia só "conectou" ou "não conectou", e era pouco: o que derrubou a
+     leitura em 30/09 foi a planilha demorar MAIS que o app esperava, e isso o
+     botão não mostrava. Agora ele cronometra e diz os segundos. Perto do limite,
+     avisa — é o aviso que teria poupado dois dias. */
+  const _t0=Date.now();
+  const _seg=function(){return ((Date.now()-_t0)/1000).toFixed(1).replace('.',',');};
+  const tmr=setTimeout(function(){falhou();},_ESPERA_PLANILHA);
   function limpar(){_testandoPlanilha=false;clearTimeout(tmr);const el=document.getElementById(cb+'_s');if(el)el.remove();try{delete window[cb];}catch(e){}}
-  function falhou(){limpar();
-    if(s)s.innerHTML='<span class="status off">✕ Não conectou — confira o link e se o Apps Script está publicado para "Qualquer pessoa"</span>';
-    if(!silencioso)toast('Não conectou');}
+  function falhou(){var g=_seg();limpar();
+    if(s)s.innerHTML='<span class="status off">✕ Não conectou — desistiu depois de '+g+' s.<br>'+
+      'Teste a porta: abra <b>o link da planilha acima</b> numa aba nova do navegador. '+
+      'Se aparecer <b>[]</b>, a internet daqui chega no Google e o problema é a planilha estar '+
+      'demorando demais; se a aba não abrir, é a rede deste computador barrando o script.google.com.</span>';
+    if(!silencioso)toast('Não conectou ('+g+' s)');}
   window[cb]=function(arr){limpar();
     const n=(arr&&arr.length)||0;
     /* Zero registros com a planilha respondendo quer dizer, quase sempre, que
@@ -4507,8 +4528,11 @@ function testarPlanilha(silencioso){
       if(!silencioso)toast('Respondeu vazia — refaça o login');
       return;
     }
-    if(s)s.innerHTML='<span class="status on">✓ Conectada — '+n+' registro(s) na planilha</span>';
-    if(!silencioso)toast('Conectado ✓');};
+    var g=_seg(), lento=(Date.now()-_t0)>(_ESPERA_PLANILHA*0.6);
+    if(s)s.innerHTML='<span class="status on">✓ Conectada — '+n+' registro(s) em '+g+' s</span>'+
+      (lento?'<br><span class="status off">⚠️ Demorou. O app espera '+(_ESPERA_PLANILHA/1000)+' s; '+
+        'perto disso, o aparelho mais lento começa a não conseguir ler. Avise a Suzana.</span>':'');
+    if(!silencioso)toast('Conectado ✓ ('+g+' s)');};
   /* O CRACHÁ TAMBÉM VAI AQUI — 09/09/2026
      Este botão era o único caminho de leitura que não mandava o crachá. Não
      incomodava enquanto a planilha respondia a qualquer um; no dia em que ela
