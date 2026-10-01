@@ -467,6 +467,9 @@
     <div class="card">
       <h2>Recebimentos <span id="origemLbl" style="font-weight:600;font-size:10px;opacity:.85;margin-left:auto"></span></h2>
       <div class="body">
+        <!-- Faixa de "lista velha" — 01/10/2026. Fica vazia enquanto a leitura
+             da planilha vai bem; ver _avisoLista(). -->
+        <div id="avisoLista" style="display:none"></div>
         <div class="hint" style="margin-top:0">Quando conectado à planilha, mostra os registros de todos os aparelhos. Sem internet, mostra os deste aparelho.</div>
         <div class="sfiltro" id="statusFiltro">
           <div class="chip on" data-s="todos" onclick="setStatusFiltro('todos')">Todos</div>
@@ -605,7 +608,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v59';
+const APP_VERSAO='v60';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3499,6 +3502,73 @@ function _lerPorPost(){
     return arr;
   });
 }
+/* ═══ A LISTA VELHA TEM DE APARECER — 01/10/2026 ══════════════════════════
+   A Suzana ficou dois dias com a lista parada no dia 29 sem desconfiar. O app
+   avisava: o rótulo ao lado de "Recebimentos" dizia "Deste aparelho" em vez de
+   "Planilha · todos os aparelhos". Só que esse rótulo tem 10 px, é cinza claro e
+   fica no canto do título — quem abre a tela quer ver os recebimentos, não
+   auditar de onde eles vieram. Os três recebimentos do dia estavam na planilha,
+   certos, e invisíveis para ela.
+   Agora a falha de leitura vira faixa, dentro do quadro, dizendo a hora da
+   última leitura que deu certo, com os dois botões que resolvem.
+   REGRA QUE FICA: neste app, falha de sincronização nunca é silenciosa. */
+var _ULT_LEITURA='petro_ultima_leitura_ok';
+function _horaBonita(ms){
+  if(!ms)return '';
+  var d=new Date(ms), ag=new Date();
+  var hm=('0'+d.getHours()).slice(-2)+'h'+('0'+d.getMinutes()).slice(-2);
+  if(d.toDateString()===ag.toDateString())return 'hoje às '+hm;
+  var on=('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2);
+  return on+' às '+hm;
+}
+function _leituraBoa(){
+  try{localStorage.setItem(_ULT_LEITURA,String(Date.now()));}catch(e){}
+  _avisoLista(true);
+}
+/* motivo: 'rede'  — não deu para falar com a planilha (o caso da Suzana, 30/09)
+            'vazia' — a planilha RESPONDEU e veio sem registro nenhum. Ver o
+                      aviso grande no callback: é quase sempre crachá vencido. */
+function _avisoLista(ok,motivo){
+  var box=document.getElementById('avisoLista'); if(!box)return;
+  if(ok){ box.innerHTML=''; box.style.display='none'; return; }
+  var q=0; try{q=Number(localStorage.getItem(_ULT_LEITURA)||0);}catch(e){}
+  var quando=q?('A última vez que a lista veio da planilha foi <b>'+_horaBonita(q)+'</b>.')
+             :('Esta lista ainda não veio da planilha neste aparelho.');
+  var corpo,botoes;
+  if(motivo==='vazia'){
+    corpo='<b style="color:#C0392B">⚠️ Esta lista pode estar velha.</b><br>'+
+      'A planilha respondeu, mas veio <b>sem nenhum registro</b>, e este aparelho tem '+
+      'recebimentos guardados. Quase sempre isso quer dizer que o <b>login venceu aqui</b>: '+
+      'saia e entre de novo no app.<br>'+quando;
+    botoes='<button class="btn" style="background:var(--amarelo);color:#111;font-weight:800;border:0;'+
+      'border-radius:8px;padding:8px 12px;cursor:pointer" '+
+      'onclick="if(window._appLogout)_appLogout()">🔑 Sair e entrar de novo</button>'+
+      '<button class="btn" style="background:#fff;border:1px solid var(--borda);border-radius:8px;'+
+      'padding:8px 12px;font-weight:700;cursor:pointer" onclick="_tentarDeNovo()">🔄 Tentar de novo</button>';
+  }else{
+    corpo='<b style="color:#C0392B">⚠️ Esta lista pode estar velha.</b><br>'+
+      'Não deu para ler a planilha agora, então está aparecendo só o que está guardado '+
+      'neste aparelho. Recebimento feito em outro aparelho pode não estar nesta tela.<br>'+quando;
+    botoes='<button class="btn" style="background:var(--amarelo);color:#111;font-weight:800;border:0;'+
+      'border-radius:8px;padding:8px 12px;cursor:pointer" onclick="_tentarDeNovo()">🔄 Tentar de novo</button>'+
+      '<button class="btn" style="background:#fff;border:1px solid var(--borda);border-radius:8px;'+
+      'padding:8px 12px;font-weight:700;cursor:pointer" '+
+      'onclick="abrirConfig();setTimeout(testarPlanilha,400)">🔎 Testar conexão</button>';
+  }
+  box.style.display='block';
+  box.innerHTML='<div style="background:#FFFBEA;border:2px solid var(--amarelo);'+
+    'border-left:6px solid #C0392B;border-radius:10px;padding:10px 12px;margin:0 0 10px;'+
+    'font-size:12px;line-height:1.45">'+corpo+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'+botoes+'</div></div>';
+}
+/* O botão destrava a leitura antes de tentar: se a trava tivesse ficado presa,
+   apertar não faria nada — e é justo nessa hora que a pessoa aperta. */
+function _tentarDeNovo(){
+  var lbl=document.getElementById('origemLbl'); if(lbl)lbl.textContent='⏳ Carregando planilha…';
+  toast('Lendo a planilha…');
+  _carregandoNuvem=false;
+  try{carregarNuvem();}catch(e){toast('Não deu para tentar agora');}
+}
 function carregarNuvem(tent){
   if(!SHEET_URL)return;
   tent=tent||0;
@@ -3515,9 +3585,10 @@ function carregarNuvem(tent){
     const e=document.getElementById(cb+'_s'); if(e)e.remove();
     try{delete window[cb];}catch(_){}
     if(tent<2){setTimeout(function(){carregarNuvem(tent+1);},1500*(tent+1));return;}
-    _carregandoNuvem=false; _origemAtual='Deste aparelho';
+    _carregandoNuvem=false; _origemAtual='⚠️ Deste aparelho';
     var lbl=document.getElementById('origemLbl'); if(lbl)lbl.textContent=_origemAtual;
     toast('Sem conexão com a planilha — mostrando deste aparelho');
+    _avisoLista(false);
   }
   window[cb]=function(arr){if(_fim)return;_fim=true;_carregandoNuvem=false;clearTimeout(_tmr);try{
       // mescla planilha + aparelho: o registro local (recém-editado) prevalece pelo id
@@ -3591,7 +3662,26 @@ function carregarNuvem(tent){
       var merged=Object.keys(map).map(function(k){return map[k];});
       _preservarAcab(local,merged); // planilha não guarda o tipo de friso/medidas — repõe do aparelho
       if(typeof window._ingestSheet==='function') window._ingestSheet(cloud); // grava os da planilha na memória e sobe p/ o Firebase
+      /* ⚠️ PLANILHA QUE RESPONDE VAZIA — 01/10/2026
+         Quando o crachá não é aceito, o Apps Script devolve lista VAZIA, com
+         status 200: recusa e planilha realmente vazia chegam aqui idênticas.
+         Até hoje o app tratava as duas como sucesso, carimbava "Planilha · todos
+         os aparelhos" e mostrava a lista do aparelho como se fosse a de todo
+         mundo — verde, tranquilizador e errado. É a mesma pedra que o botão
+         "Testar conexão" já tinha tropeçado em 09/09/2026, e que ninguém
+         transportou para o caminho de leitura de verdade, que é o que a equipe
+         usa o dia inteiro.
+         Planilha vazia COM registros no aparelho não é vitória: é aviso. */
+      if(!cloud.length&&local.length){
+        _origemAtual='⚠️ Planilha respondeu vazia';
+        renderFromArray(merged,_origemAtual,true);
+        _avisoLista(false,'vazia');
+        try{_reparoEnviar();}catch(e){console.error('[Petro] erro no reparo:',e);}
+        delete window[cb]; var s3=document.getElementById(cb+'_s'); if(s3)s3.remove();
+        return;
+      }
       _origemAtual='Planilha · todos os aparelhos';
+      _leituraBoa();
       renderFromArray(merged,_origemAtual,true);
       try{_reparoEnviar();}catch(e){console.error('[Petro] erro no reparo:',e);}
     }catch(e){
@@ -3600,9 +3690,10 @@ function carregarNuvem(tent){
          "Carregando planilha…" para sempre, dando a impressão de que a planilha
          não respondia. Agora o erro aparece no console e a tela sai do limbo. */
       console.error('[Petro] erro ao mesclar com a planilha:',e);
-      _origemAtual='Deste aparelho (erro ao mesclar)';
+      _origemAtual='⚠️ Deste aparelho (erro ao mesclar)';
       var lb=document.getElementById('origemLbl'); if(lb)lb.textContent=_origemAtual;
       toast('Erro ao juntar os dados da planilha — avise a Suzana');
+      _avisoLista(false);
     }
     delete window[cb]; const s2=document.getElementById(cb+'_s'); if(s2)s2.remove();};
   const s=document.createElement('script'); s.id=cb+'_s';
