@@ -535,6 +535,13 @@
     <div class="hint">Destino "Admissão" (quando o comercial devolve para corrigir). Pode pôr vários separados por vírgula.</div>
     <button class="btn btn-prim" style="width:100%" onclick="salvarConfig()">Salvar</button>
     <button class="btn" style="width:100%;background:#eee;margin-top:10px" onclick="testarPlanilha()">Testar conexão</button>
+    <!-- Diagnóstico da leitura — 01/10/2026. O "Testar conexão" prova que a
+         planilha responde, mas ele usa SÓ o caminho antigo. Quando a lista não
+         atualiza e o teste diz que está tudo bem, é porque o problema está na
+         outra perna. Este botão mede as duas, uma de cada vez, e mostra onde
+         emperra. Não grava nada: só lê e conta. -->
+    <button class="btn" style="width:100%;background:#eee;margin-top:8px" onclick="diagnosticoLeitura()">🧪 Diagnóstico da leitura</button>
+    <div id="cfgDiag" style="margin-top:8px"></div>
     <button class="btn" style="width:100%;background:#fdecea;color:#C0392B;margin-top:10px" onclick="if(window._appLogout)_appLogout()">Sair (deslogar deste aparelho)</button>
   </div>
 </div>
@@ -641,7 +648,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v62';
+const APP_VERSAO='v63';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3778,7 +3785,120 @@ function _esc(s){
   });
 }
 
-function carregarNuvem(tent){
+/* ═══ DIAGNÓSTICO DA LEITURA — 01/10/2026 ════════════════════════════════
+   Escrito depois de errar o diagnóstico DUAS vezes num dia só, adivinhando de
+   longe o que acontecia no computador da Mari. Primeiro culpei o tamanho da
+   planilha; o teste da ⚙️ respondeu "382 registros em 4,5 s" e derrubou a
+   teoria. Depois culpei o relógio compartilhado entre os dois caminhos;
+   consertei, e a lista dela continuou parada.
+
+   A lição é velha e eu tinha deixado de aplicar: medir onde o defeito mora, não
+   onde é confortável medir. O "Testar conexão" prova que a planilha responde,
+   mas usa SÓ o caminho antigo — justamente o que funciona lá. Este aqui faz as
+   duas pernas, uma de cada vez, cronometrando cada uma, e mostra qual delas
+   emperra. Uma foto da tela e acabou a adivinhação.
+
+   NÃO GRAVA NADA. Só lê e conta. */
+function _comPrazo(p,ms,oque){
+  return new Promise(function(res,rej){
+    var fim=false;
+    var tm=setTimeout(function(){ if(!fim){fim=true;rej(new Error(oque+' não respondeu em '+(ms/1000)+' s'));} },ms);
+    p.then(function(x){ if(!fim){fim=true;clearTimeout(tm);res(x);} },
+           function(e){ if(!fim){fim=true;clearTimeout(tm);rej(e&&e.message?e:new Error(oque+' falhou'));} });
+  });
+}
+/* O caminho antigo (JSONP) sozinho, para o diagnóstico poder medi-lo separado
+   do outro. Mesmo endereço e mesmos parâmetros da leitura de verdade. */
+function _lerPorJsonp(prazo){
+  return new Promise(function(resolve,reject){
+    var cb='cbDiag_'+Date.now(), fim=false;
+    var tm=setTimeout(function(){ if(!fim){fim=true;limpar();reject(new Error('o caminho antigo não respondeu em '+(prazo/1000)+' s'));} },prazo);
+    function limpar(){ clearTimeout(tm); var e=document.getElementById(cb+'_s'); if(e)e.remove(); try{delete window[cb];}catch(_){}}
+    window[cb]=function(arr){ if(fim)return; fim=true; limpar(); resolve(arr||[]); };
+    _tokenLogin().then(function(tk){
+      if(fim)return;
+      var s=document.createElement('script'); s.id=cb+'_s';
+      s.onerror=function(){ if(!fim){fim=true;limpar();reject(new Error('o navegador recusou a chamada do caminho antigo'));} };
+      s.src=SHEET_URL+(SHEET_URL.indexOf('?')<0?'?':'&')+'callback='+cb+'&k='+encodeURIComponent(CHAVE)
+           +(tk?('&tk='+encodeURIComponent(tk)):'')+'&t='+Date.now();
+      document.body.appendChild(s);
+    }).catch(function(){ if(!fim){fim=true;limpar();reject(new Error('não consegui o crachá'));} });
+  });
+}
+/* Põe na lista o que o diagnóstico acabou de trazer da planilha. */
+function _usarDoDiagnostico(){
+  var d=window._diagDados;
+  if(!d||!d.length){ toast('Não tenho dados do diagnóstico'); return; }
+  _carregandoNuvem=false;
+  try{ carregarNuvem(0,d); fecharConfig(); toast('Lista atualizada com '+d.length+' ficha(s)'); }
+  catch(e){ toast('Não consegui aplicar — avise a Suzana'); }
+}
+var _diagRodando=false;
+function diagnosticoLeitura(){
+  var box=document.getElementById('cfgDiag'); if(!box)return;
+  if(_diagRodando){ return; }
+  _diagRodando=true;
+  var L=[];
+  function diz(s){
+    L.push(s);
+    box.innerHTML='<div style="background:#111;color:#eee;border-radius:9px;padding:10px 12px;'+
+      'font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.6;white-space:pre-wrap;'+
+      'word-break:break-word">'+_esc(L.join('\n'))+'</div>';
+  }
+  function seg(t0){ return ((Date.now()-t0)/1000).toFixed(1).replace('.',',')+' s'; }
+  var nLocal=0; try{ nLocal=(JSON.parse(localStorage.getItem('petro_receb')||'[]')||[]).length; }catch(e){}
+  var fbOk=(typeof firebase!=='undefined' && firebase.apps && firebase.apps.length);
+  diz('DIAGNÓSTICO DA LEITURA — '+APP_VERSAO);
+  diz('Internet: '+(navigator.onLine?'sim':'NÃO'));
+  diz('Guardado neste aparelho: '+nLocal+' ficha(s)');
+  diz('Rótulo da lista: '+(_origemAtual||'(ainda não terminou nenhuma leitura)'));
+  diz('Leitura em andamento: '+(_carregandoNuvem
+      ?('sim, há '+Math.round((Date.now()-_carregandoDesde)/1000)+' s')
+      :'não'));
+  diz('Firebase: '+(fbOk?'carregado':'NÃO carregou neste aparelho'));
+  diz('');
+  var t0=Date.now(), trouxe=null;
+  diz('1/3 crachá de login…');
+  _comPrazo(_tokenLogin(),10000,'o crachá')
+    .then(function(tk){
+      diz('    '+(tk?('ok, obtido em '+seg(t0)):'SEM CRACHÁ — a planilha vai responder vazia'));
+    })
+    .catch(function(e){ diz('    FALHOU: '+e.message); })
+    .then(function(){
+      t0=Date.now(); diz('2/3 caminho novo (POST)…');
+      return _comPrazo(_lerPorPost(),20000,'o caminho novo')
+        .then(function(arr){ trouxe=trouxe||arr; diz('    ok: '+arr.length+' registro(s) em '+seg(t0)); })
+        .catch(function(e){ diz('    FALHOU em '+seg(t0)+': '+e.message); });
+    })
+    .then(function(){
+      t0=Date.now(); diz('3/3 caminho antigo (reserva)…');
+      return _lerPorJsonp(25000)
+        .then(function(arr){ trouxe=trouxe||arr; diz('    ok: '+arr.length+' registro(s) em '+seg(t0)); })
+        .catch(function(e){ diz('    FALHOU em '+seg(t0)+': '+e.message); });
+    })
+    .then(function(){
+      diz('');
+      if(trouxe&&trouxe.length){
+        diz('CONCLUSÃO: a planilha responde neste aparelho ('+trouxe.length+' fichas).');
+        if(trouxe.length>nLocal) diz('Faltam '+(trouxe.length-nLocal)+' ficha(s) aqui dentro.');
+        window._diagDados=trouxe;
+        box.innerHTML+='<button class="btn" style="width:100%;background:var(--amarelo);color:#111;'+
+          'font-weight:800;border:0;border-radius:9px;padding:11px;margin-top:8px;cursor:pointer" '+
+          'onclick="_usarDoDiagnostico()">Usar estes dados agora</button>';
+      }else{
+        diz('CONCLUSÃO: nenhum dos dois caminhos trouxe dados neste aparelho.');
+        diz('Mande esta tela para a Suzana.');
+      }
+      _diagRodando=false;
+    });
+}
+
+/* `jaTenho` — 01/10/2026. Lista que já veio da planilha por outro caminho (o
+   botão "Testar conexão" e o diagnóstico leem de verdade e, até hoje, jogavam
+   o resultado fora). Com ela, a leitura pula a rede e vai direto para a parte
+   que mescla, desenha e guarda. É dado que já foi pago: não faz sentido o app
+   ter os 382 registros na mão e continuar mostrando 369. */
+function carregarNuvem(tent,jaTenho){
   if(!SHEET_URL)return;
   tent=tent||0;
   /* A trava impede duas leituras ao mesmo tempo. Mas trava que fica presa é
@@ -3954,6 +4074,11 @@ function carregarNuvem(tent){
         +(tk?('&tk='+encodeURIComponent(tk)):'')+'&t='+Date.now();
       document.body.appendChild(s);
     }).catch(function(){ if(!_fim)_falhou(); });
+  }
+  /* Já veio pronto de outro lugar: aproveita e não toca na rede. */
+  if(Array.isArray(jaTenho)){
+    var _f0=window[cb]; if(typeof _f0==='function')_f0(jaTenho);
+    return;
   }
   /* CAMINHO PREFERIDO: POST com CORS, crachá no corpo — nada em endereço. */
   _lerPorPost().then(function(arr){
@@ -4754,6 +4879,13 @@ function testarPlanilha(silencioso){
       if(!silencioso)toast('Respondeu vazia — refaça o login');
       return;
     }
+    /* O TESTE NÃO JOGA FORA O QUE LEU — 01/10/2026.
+       Este botão fazia uma leitura completa da planilha e descartava o
+       resultado. No computador da Mari isso era quase cômico: a ⚙️ dizia "382
+       registros" na mesma tela em que a lista mostrava 369 e não saía dali.
+       Agora o que ele traz entra na lista pelo caminho de sempre. */
+    try{ if(n && typeof carregarNuvem==='function'){ _carregandoNuvem=false; carregarNuvem(0,arr); } }
+    catch(e){ console.warn('[Petro] não consegui aproveitar o resultado do teste:',e); }
     var g=_seg(), lento=(Date.now()-_t0)>(_ESPERA_PLANILHA*0.6);
     if(s)s.innerHTML='<span class="status on">✓ Conectada — '+n+' registro(s) em '+g+' s</span>'+
       (lento?'<br><span class="status off">⚠️ Demorou. O app espera '+(_ESPERA_PLANILHA/1000)+' s; '+
