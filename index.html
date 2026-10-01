@@ -486,6 +486,12 @@
           <input type="text" id="buscaCliente" placeholder="🔎 Buscar por cliente ou NF…" oninput="filtrarLista()" style="margin-bottom:0">
           <button class="btn btn-sec" style="padding:11px 13px" onclick="renderSaved()" title="Atualizar da planilha">🔄</button>
         </div>
+        <!-- Porta do histórico — 01/10/2026. Fica logo abaixo da busca, que é
+             onde a pessoa está quando não acha o que procura. -->
+        <div class="hint" style="margin:-4px 0 10px">
+          Não achou? A ficha atendida há mais de 30 dias fica guardada no histórico.
+          <a href="#" onclick="abrirHistorico();return false" style="color:#111;font-weight:700">🗄 Procurar no histórico</a>
+        </div>
         <div id="pendBar" style="display:none;align-items:center;gap:10px;background:#fff4e0;border:1px solid #f0a500;border-left:5px solid #f0a500;border-radius:8px;padding:10px 12px;margin-bottom:10px">
           <span id="pendTxt" style="flex:1;font-size:13px;font-weight:600;color:#8a5200;line-height:1.35"></span>
           <button class="btn btn-sec" style="padding:8px 12px;font-size:12px;white-space:nowrap;margin:0" onclick="filaEnviar(true)">Reenviar agora</button>
@@ -551,6 +557,33 @@
   </div>
 </div>
 
+<!-- ═══ HISTÓRICO ═══════════════════════════════════════════════════════
+     01/10/2026. A ficha atendida e antiga sai da lista de trabalho para a aba
+     "Histórico" da planilha — é o que faz a lista parar de crescer e a leitura
+     parar de estourar o tempo. Esta janela é a contrapartida: sem um lugar para
+     achar o que foi arquivado, arquivar seria sumir com dado, e com razão
+     ninguém deixaria. A busca é SOB DEMANDA e pode demorar; acontece uma vez
+     por semana, não de 90 em 90 segundos.
+     É só leitura: mexer numa ficha arquivada é raro e fazer isso pela metade
+     seria pior do que não fazer. -->
+<div class="modalbg" id="histModal">
+  <div class="modal" style="max-width:min(760px,96vw);width:100%">
+    <button class="x" onclick="fecharHistorico()">×</button>
+    <h3>🗄 Histórico de recebimentos</h3>
+    <p class="hint" style="margin-top:2px">
+      Fichas já atendidas, guardadas fora da lista de trabalho. Procure por
+      <b>cliente</b>, <b>nota fiscal</b> ou <b>número da ficha</b>.
+    </p>
+    <div style="display:flex;gap:8px;margin:10px 0">
+      <input type="text" id="histTermo" placeholder="Ex.: Klivenbor, 12345, NF 998"
+             onkeydown="if(event.key==='Enter')buscarHistorico()" style="margin-bottom:0">
+      <button class="btn" onclick="buscarHistorico()"
+              style="background:var(--amarelo);color:#111;font-weight:800;border:0;border-radius:9px;padding:0 16px;cursor:pointer">Procurar</button>
+    </div>
+    <div id="histResultado" style="max-height:55vh;overflow:auto"></div>
+  </div>
+</div>
+
 <div class="modalbg" id="enviarModal">
   <div class="modal">
     <button class="x" onclick="fecharEnviar()">×</button>
@@ -608,7 +641,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v61';
+const APP_VERSAO='v62';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3467,7 +3500,7 @@ var _reparoPend=[];
    Sem a trava, cada aviso do Firebase disparava uma leitura nova; com vários
    aparelhos abertos viravam dezenas de chamadas empilhadas — era isso que
    congestionava o Apps Script e prendia a tela em "Carregando planilha…". */
-var _carregandoNuvem=false, _origemAtual='';
+var _carregandoNuvem=false, _carregandoDesde=0, _origemAtual='';
 function _reparoEnviar(){
   if(!SHEET_URL||!_reparoPend.length)return;
   var lista=_reparoPend.slice(0,40); _reparoPend=[];
@@ -3487,6 +3520,54 @@ function _reparoEnviar(){
    A reserva existe porque leitura é a parte historicamente mais frágil deste
    app (foi ela que já prendeu a tela em "Carregando planilha…"). Nenhuma
    mudança aqui pode ter só um caminho. */
+/* ═══ FICHA QUE FOI PARA O HISTÓRICO — 01/10/2026 ═════════════════════════
+   A planilha passou a mover a ficha atendida e antiga para a aba "Histórico"
+   (ver `arquivarAntigas` no Code.gs). Sem o que está aqui, o aparelho que ainda
+   tivesse essa ficha guardada a colocaria de volta na lista a cada atualização
+   — e, pior, a empurraria de novo para o Firebase. O peso voltaria em um dia.
+
+   POR QUE NÃO USAR AS LÁPIDES (`_tumbas`), que já existem: lápide quer dizer
+   APAGADA, e apagada não volta nunca mais. Arquivada tem de poder voltar, se um
+   dia alguém desarquivar. São coisas diferentes e merecem caminhos diferentes.
+
+   COMO OS DOIS LADOS COMBINAM SEM CONVERSAR: a regra abaixo é a mesma do
+   `_podeArquivar_` do Code.gs — atendida, fora do orçamento, com data e mais
+   velha que DIAS_HISTORICO. Cada lado aplica no que é dele e os dois chegam no
+   mesmo lugar. Mexeu num, mexe no outro.
+
+   A TRAVA QUE IMPEDE O ESTRAGO: só sai do aparelho a ficha que (1) casa com a
+   regra E (2) NÃO veio na leitura da planilha. Se ela ainda está na planilha,
+   fica — senão o app tiraria e a leitura seguinte traria de volta, num vaivém
+   que reescreveria o Firebase de 90 em 90 segundos. */
+var DIAS_HISTORICO=30;              // tem de ser igual ao DIAS_HISTORICO do Code.gs
+function _msData(v){
+  if(!v)return 0;
+  if(typeof v.getTime==='function'){var t=v.getTime();return isNaN(t)?0:t;}
+  var s=String(v), m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m)return new Date(+m[1],+m[2]-1,+m[3]).getTime();
+  var m2=s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if(m2)return new Date(+m2[3],+m2[2]-1,+m2[1]).getTime();
+  var t2=Date.parse(s); return isNaN(t2)?0:t2;
+}
+function _eArquivada(r){
+  if(!r)return false;
+  if((r.status||'')!=='Atendido')return false;
+  if(String(r.etapa||'').toLowerCase()==='orcamento')return false;
+  var ref=_msData(r.atendidoEm)||_msData(r.data)||_msData(r._ts);
+  if(!ref)return false;
+  return ref < (Date.now()-DIAS_HISTORICO*864e5);
+}
+/* Tira do que está guardado no aparelho o que já foi para o Histórico.
+   `naPlanilha` é o mapa do que veio na leitura; sem ele, nada é tirado. */
+function _tirarArquivadas(lista,naPlanilha){
+  if(!naPlanilha)return lista;
+  return lista.filter(function(r){
+    if(!r||r.id==null)return true;
+    if(naPlanilha[String(r.id)])return true;   // ainda está na planilha: fica
+    return !_eArquivada(r);
+  });
+}
+
 /* QUANTO O APP ESPERA PELA PLANILHA — 01/10/2026
    Era 14 s, e 14 s virou o problema. Medido daqui no mesmo dia: só a RECUSA do
    /exec (quando o crachá não vai junto, e o script não chega a abrir a planilha)
@@ -3498,11 +3579,43 @@ function _reparoEnviar(){
    mostra dado de dois dias atrás. Com a faixa de lista velha avisando, a espera
    maior não esconde nada de ninguém. */
 var _ESPERA_PLANILHA=30000;
+
+/* ⚠️ RÉDEA CURTA PARA O CAMINHO NOVO — 01/10/2026, no computador da Mari.
+   Este é o defeito de verdade, e ele enganou o dia inteiro.
+
+   A leitura tem dois caminhos: o POST com CORS (preferido, o crachá viaja no
+   corpo) e o JSONP de reserva. Os dois corriam dentro do MESMO relógio: o POST
+   tinha 12 s e o conjunto, 14 s — ou seja, se o POST pendurasse até o fim, a
+   reserva nascia com 2 segundos de vida e morria sem chegar à planilha.
+
+   No computador da Mari (vendas2@) o POST pendura em vez de recusar na hora.
+   Em todo o resto da Petro ele recusa depressa, a reserva pega os segundos que
+   sobram e ninguém nota nada. Era por isso que só aquela máquina ficava para
+   trás — e era por isso que o botão "Testar conexão" dizia "Conectada, 382
+   registros em 4,5 s" na mesma tela em que a lista não atualizava: o teste da
+   ⚙️ não usa o POST, vai direto no caminho antigo.
+
+   Agora o POST tem 8 segundos, e só. Falhou, a reserva começa com o relógio
+   ZERADO e os 30 segundos inteiros — nunca com as sobras do outro. */
+var _ESPERA_POST=8000;
+
+/* Assinatura leve da lista, só para saber se vale gravar. Compara id, etapa,
+   status e a hora da última mexida — nunca o conteúdo inteiro, que tem foto
+   dentro e custaria caro a cada leitura. */
+function _sigLista(arr){
+  if(!arr||!arr.length)return '0';
+  var p=[];
+  for(var i=0;i<arr.length;i++){
+    var r=arr[i]; if(!r)continue;
+    p.push(r.id+':'+(r.etapa||'')+':'+(r.status||'')+':'+(r.updatedAt||0));
+  }
+  return p.sort().join('|');
+}
 function _lerPorPost(){
   return _tokenLogin().then(function(tk){
     var corpo={action:'ler'}; if(CHAVE)corpo.k=CHAVE; if(tk)corpo.token=tk;
     var ctrl=(typeof AbortController!=='undefined')?new AbortController():null;
-    if(ctrl)setTimeout(function(){try{ctrl.abort();}catch(e){}},_ESPERA_PLANILHA-5000);
+    if(ctrl)setTimeout(function(){try{ctrl.abort();}catch(e){}},_ESPERA_POST);
     return fetch(SHEET_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
       body:JSON.stringify(corpo),signal:ctrl?ctrl.signal:undefined});
   }).then(function(r){
@@ -3580,17 +3693,109 @@ function _tentarDeNovo(){
   _carregandoNuvem=false;
   try{carregarNuvem();}catch(e){toast('Não deu para tentar agora');}
 }
+/* ═══ BUSCA NO HISTÓRICO — 01/10/2026 ════════════════════════════════════
+   Mesmo par de caminhos da leitura normal: POST com o crachá no corpo e, se
+   ele falhar, o JSONP de reserva (`?hist=`). Leitura que só tem um caminho
+   neste app já prendeu a tela antes; aqui não ia ser diferente. */
+function abrirHistorico(){
+  var m=document.getElementById('histModal'); if(!m)return;
+  m.classList.add('show');
+  var t=document.getElementById('histTermo');
+  var b=document.getElementById('buscaCliente');
+  if(t){ if(b&&b.value.trim())t.value=b.value.trim(); setTimeout(function(){t.focus();},80); }
+  var r=document.getElementById('histResultado');
+  if(r&&!r.innerHTML)r.innerHTML='<div class="hint">Digite e toque em Procurar.</div>';
+}
+function fecharHistorico(){
+  var m=document.getElementById('histModal'); if(!m)return;
+  m.classList.remove('show');
+}
+function _histPorPost(termo){
+  return _tokenLogin().then(function(tk){
+    var corpo={action:'historico',termo:termo}; if(CHAVE)corpo.k=CHAVE; if(tk)corpo.token=tk;
+    var ctrl=(typeof AbortController!=='undefined')?new AbortController():null;
+    if(ctrl)setTimeout(function(){try{ctrl.abort();}catch(e){}},_ESPERA_POST);
+    return fetch(SHEET_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify(corpo),signal:ctrl?ctrl.signal:undefined});
+  }).then(function(r){ if(!r||!r.ok)throw new Error('resposta ruim'); return r.json(); })
+    .then(function(a){ if(!Array.isArray(a))throw new Error('formato inesperado'); return a; });
+}
+function _histPorJsonp(termo){
+  return new Promise(function(resolve,reject){
+    var cb='cbHist_'+Date.now(), fim=false;
+    var tmr=setTimeout(function(){ if(!fim){fim=true;limpar();reject(new Error('demorou'));} },_ESPERA_PLANILHA);
+    function limpar(){ clearTimeout(tmr); var e=document.getElementById(cb+'_s'); if(e)e.remove(); try{delete window[cb];}catch(_){}}
+    window[cb]=function(arr){ if(fim)return; fim=true; limpar(); resolve(arr||[]); };
+    _tokenLogin().then(function(tk){
+      if(fim)return;
+      var s=document.createElement('script'); s.id=cb+'_s';
+      s.onerror=function(){ if(!fim){fim=true;limpar();reject(new Error('erro'));} };
+      s.src=SHEET_URL+(SHEET_URL.indexOf('?')<0?'?':'&')+'callback='+cb+'&k='+encodeURIComponent(CHAVE)
+           +'&hist='+encodeURIComponent(termo)+(tk?('&tk='+encodeURIComponent(tk)):'')+'&t='+Date.now();
+      document.body.appendChild(s);
+    }).catch(function(){ if(!fim){fim=true;limpar();reject(new Error('sem crachá'));} });
+  });
+}
+function buscarHistorico(){
+  var t=(document.getElementById('histTermo')||{}).value||'';
+  t=t.trim();
+  var box=document.getElementById('histResultado'); if(!box)return;
+  if(t.length<2){ box.innerHTML='<div class="hint">Digite pelo menos duas letras.</div>'; return; }
+  box.innerHTML='<div class="hint">⏳ Procurando no histórico… isso pode levar alguns segundos.</div>';
+  _histPorPost(t).catch(function(){ return _histPorJsonp(t); })
+    .then(function(arr){ _histMostrar(arr,t); })
+    .catch(function(){
+      box.innerHTML='<div class="hint" style="color:#C0392B">Não deu para falar com a planilha agora. '+
+        'Tente de novo daqui a pouco — o histórico continua guardado lá.</div>';
+    });
+}
+function _histMostrar(arr,termo){
+  var box=document.getElementById('histResultado'); if(!box)return;
+  arr=arr||[];
+  if(!arr.length){
+    box.innerHTML='<div class="hint">Nada encontrado para <b>'+_esc(termo)+'</b> no histórico. '+
+      'Vale conferir a escrita do cliente ou procurar pelo número da ficha.</div>';
+    return;
+  }
+  var h='<div class="hint" style="margin-bottom:8px">'+arr.length+' ficha(s) no histórico. '+
+        'Esta tela é só de consulta.</div>';
+  arr.forEach(function(r){
+    var pecas=(r.pecas||[]).length;
+    h+='<div style="border:1px solid var(--borda);border-radius:9px;padding:9px 11px;margin-bottom:7px">'+
+       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline">'+
+       '<b style="font-size:14px">'+_esc(r.cliente||'(sem cliente)')+'</b>'+
+       '<span class="hint" style="margin:0">ficha '+_esc(String(r.id||''))+'</span></div>'+
+       '<div class="hint" style="margin:3px 0 0">'+
+       'Recebida em '+_esc(r.data||'?')+(r.atendidoEm?(' · atendida em '+_esc(r.atendidoEm)):'')+
+       (r.nf?(' · NF '+_esc(r.nf)):'')+' · '+pecas+' peça(s)'+
+       (r.resp?(' · '+_esc(r.resp)):'')+'</div></div>';
+  });
+  box.innerHTML=h;
+}
+function _esc(s){
+  return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+  });
+}
+
 function carregarNuvem(tent){
   if(!SHEET_URL)return;
   tent=tent||0;
-  if(tent===0){ if(_carregandoNuvem)return; _carregandoNuvem=true; } // já tem uma leitura em andamento
+  /* A trava impede duas leituras ao mesmo tempo. Mas trava que fica presa é
+     pior do que trava nenhuma: o app nunca mais lê e a tela fica em
+     "Carregando planilha…" para sempre — já aconteceu aqui. Por isso ela tem
+     prazo: passado o dobro da espera, a leitura seguinte entra assim mesmo. */
+  if(tent===0){
+    if(_carregandoNuvem && (Date.now()-_carregandoDesde)<(_ESPERA_PLANILHA*2))return;
+    _carregandoNuvem=true; _carregandoDesde=Date.now();
+  }
   const cb='cbPetro_'+Date.now();
   /* Se o Apps Script devolve página de erro ou demora demais, o <script> carrega
      sem disparar onerror e a função de retorno nunca é chamada — a leitura ficava
      pendurada para sempre ("⏳ Carregando planilha…" eterno). Este relógio garante
      que a falha silenciosa vire falha de verdade, com retentativa. */
   let _fim=false;
-  const _tmr=setTimeout(function(){ if(!_fim)_falhou(); },_ESPERA_PLANILHA);
+  let _tmr=setTimeout(function(){ if(!_fim)_falhou(); },_ESPERA_PLANILHA);
   function _falhou(){
     _fim=true; clearTimeout(_tmr);
     const e=document.getElementById(cb+'_s'); if(e)e.remove();
@@ -3612,6 +3817,9 @@ function carregarNuvem(tent){
       local.forEach(function(r){
         if(!r||r.id==null)return;
         var k=String(r.id), c=map[k], venceu;
+        /* Sumiu da planilha E casa com a regra do Histórico: foi arquivada.
+           Não entra na lista. Ver o bloco "FICHA QUE FOI PARA O HISTÓRICO". */
+        if(!c&&_eArquivada(r))return;
         // 1) quem vence no geral (dados da ficha): o mais recente; empate fica com o aparelho
         if(!c||(r.updatedAt||0)>=(c.updatedAt||0)){ map[k]=r; venceu=r; }
         else{
@@ -3691,6 +3899,18 @@ function carregarNuvem(tent){
         delete window[cb]; var s3=document.getElementById(cb+'_s'); if(s3)s3.remove();
         return;
       }
+      /* ⚠️ GUARDAR O QUE ACABOU DE LER — 01/10/2026, computador da Mari.
+         A leitura trazia os 382 da planilha, desenhava na tela e NÃO guardava
+         nada. Quem guardava era só o `_ingestSheet`, que desiste logo no começo
+         quando o Firebase não está pronto naquele aparelho. Resultado: a tela
+         mostrava 382 e, ao fechar a ⚙️ — qualquer coisa que redesenhe a lista
+         relê o que está guardado —, voltava para os 369 do dia 29. Parecia que
+         "atualiza e volta atrás"; na verdade nunca tinha sido guardado.
+         A planilha é a fonte da verdade: o que vem dela fica no aparelho,
+         com Firebase ou sem. */
+      try{
+        if(typeof _guardaReceb==='function' && _sigLista(merged)!==_sigLista(local)) _guardaReceb(merged);
+      }catch(e){ console.warn('[Petro] não consegui guardar o que veio da planilha:',e); }
       _origemAtual='Planilha · todos os aparelhos';
       _leituraBoa();
       renderFromArray(merged,_origemAtual,true);
@@ -3722,6 +3942,12 @@ function carregarNuvem(tent){
      página aí: script sem src não carrega nada, e definir o src depois de
      inserir faria o navegador buscar duas vezes. */
   function _reservaJsonp(){
+    /* RELÓGIO ZERADO (01/10/2026). A reserva não paga pelo tempo que o POST
+       gastou: ela começa agora, com os 30 segundos inteiros. Sem isto, o POST
+       pendurado no computador da Mari deixava a reserva com dois segundos de
+       vida, e a leitura falhava mesmo com a planilha respondendo em 4,5 s. */
+    clearTimeout(_tmr);
+    _tmr=setTimeout(function(){ if(!_fim)_falhou(); },_ESPERA_PLANILHA);
     _tokenLogin().then(function(tk){
       if(_fim)return;
       s.src=SHEET_URL+(SHEET_URL.indexOf('?')<0?'?':'&')+'callback='+cb+'&k='+encodeURIComponent(CHAVE)
@@ -5001,9 +5227,18 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
     try{
       if(!_fbReady || !Array.isArray(cloudArr) || !cloudArr.length) return;
       var local=_getReceb();
-      var merged=_mesclar(local, cloudArr, _getTumbas()); // planilha entra; local (mais novo) prevalece; lápides removem
-      _preservarFotos(local, merged);                     // mantém as fotos locais
-      if(typeof _preservarAcab==='function')_preservarAcab(local, merged); // e o acabamento estruturado (tipo de friso)
+      /* ARQUIVADAS — 01/10/2026. Esta é a única porta por onde a ficha que foi
+         para o Histórico sai de dentro do aparelho (e, com ela, do documento do
+         Firebase, que é montado a partir daqui). A lista da planilha chega
+         inteira em `cloudArr`, e só o que NÃO está nela pode sair. A guarda do
+         `!cloudArr.length` logo acima é o que impede uma leitura vazia — crachá
+         recusado, por exemplo — de limpar o aparelho inteiro. */
+      var naPlanilha={};
+      for(var _i=0;_i<cloudArr.length;_i++){ var _r=cloudArr[_i]; if(_r&&_r.id!=null)naPlanilha[String(_r.id)]=1; }
+      var vivos=(typeof _tirarArquivadas==='function')?_tirarArquivadas(local,naPlanilha):local;
+      var merged=_mesclar(vivos, cloudArr, _getTumbas()); // planilha entra; local (mais novo) prevalece; lápides removem
+      _preservarFotos(vivos, merged);                     // mantém as fotos locais
+      if(typeof _preservarAcab==='function')_preservarAcab(vivos, merged); // e o acabamento estruturado (tipo de friso)
       if(_sig(merged)===_sig(local)) return;              // nada novo
       _fbAplicando=true;
       try{ localStorage.setItem(KEY, JSON.stringify(merged)); }catch(e){}
