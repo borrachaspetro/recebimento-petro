@@ -541,6 +541,9 @@
          outra perna. Este botão mede as duas, uma de cada vez, e mostra onde
          emperra. Não grava nada: só lê e conta. -->
     <button class="btn" style="width:100%;background:#eee;margin-top:8px" onclick="diagnosticoLeitura()">🧪 Diagnóstico da leitura</button>
+    <!-- 02/10/2026 — quando o navegador diz que não há memória para concluir
+         a operação. Apaga só a cópia das fotos já guardadas no Firebase. -->
+    <button class="btn" style="width:100%;background:#eee;margin-top:8px" onclick="liberarEspaco()">🧹 Liberar espaço neste aparelho</button>
     <div id="cfgDiag" style="margin-top:8px"></div>
     <button class="btn" style="width:100%;background:#fdecea;color:#C0392B;margin-top:10px" onclick="if(window._appLogout)_appLogout()">Sair (deslogar deste aparelho)</button>
   </div>
@@ -648,7 +651,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v63';
+const APP_VERSAO='v64';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3438,8 +3441,67 @@ function _guardaReceb(arr){
     try{ localStorage.setItem('petro_receb',JSON.stringify(arr)); return true; }catch(e2){}
     try{ localStorage.setItem('petro_receb',JSON.stringify(_semTodasFotos(arr)));
       toast('Memória do aparelho cheia — salvei sem as fotos (elas já foram no e-mail).'); return true; }catch(e3){}
-    toast('Memória do aparelho cheia. O envio pro comercial e a planilha foram feitos.'); return false;
+    /* Último degrau: nem sem as fotos coube. A ação JÁ foi para a planilha —
+       quem chama este gravador manda para lá em seguida, e é lá que fica o
+       registro. O aviso tem de dizer isso e dizer o que fazer, senão a pessoa
+       conclui (com razão) que perdeu o trabalho. 02/10/2026. */
+    toast('Memória deste aparelho cheia. A ação foi para a planilha mesmo assim — '+
+          'abra a ⚙️ e toque em "Liberar espaço".');
+    return false;
   }
+}
+/* ═══ LIBERAR ESPAÇO — 02/10/2026 ════════════════════════════════════════
+   A memória que o navegador dá para um site é pequena, e o que a enche são as
+   FOTOS das fichas antigas, guardadas em texto dentro da lista. Elas já estão
+   no Firebase Storage: aqui elas são cópia. Este botão apaga a cópia das
+   fichas antigas e diz quanto liberou.
+   Só apaga foto de ficha que o app confirma ter subido (`_fotosSincronizadas`).
+   Sem essa confirmação, não apaga nada — perder a única cópia de uma foto é
+   estrago que não se desfaz. */
+function _tamanhoGuardado(){
+  var t=0; try{ for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i);
+    t+=(k.length+(localStorage.getItem(k)||'').length); } }catch(e){}
+  return Math.round(t/1024);
+}
+/* O QUE ESTÁ OCUPANDO — 02/10/2026. Saber que "está cheio" não resolve: o
+   socorro do `_guardaReceb` já grava sem as fotos, e mesmo assim não coube num
+   aparelho. Então alguma OUTRA coisa está tomando o espaço, e sem ver a lista
+   por tamanho a gente continua adivinhando — que foi o erro do dia 01/10. */
+function _ocupacao(){
+  var itens=[];
+  try{ for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i);
+    itens.push({chave:k, kb:Math.round((k.length+(localStorage.getItem(k)||'').length)/1024)}); } }catch(e){}
+  itens.sort(function(a,b){return b.kb-a.kb;});
+  return itens;
+}
+function liberarEspaco(){
+  var antes=_tamanhoGuardado();
+  var conferiu=(typeof window._fotosSincronizadas==='function');
+  _limparFotosAntigas(30);
+  var depois=_tamanhoGuardado();
+  var libertou=antes-depois;
+  var s=document.getElementById('cfgStatus');
+  var msg;
+  if(libertou>0){
+    msg='<span class="status on">✓ Liberei '+libertou+' KB (de '+antes+' para '+depois+' KB). '+
+        'Tente salvar de novo.</span>';
+  }else if(!conferiu){
+    msg='<span class="status off">Não liberei nada: este aparelho não conseguiu confirmar quais '+
+        'fotos já subiram, e eu não apago foto sem essa confirmação. '+
+        'Feche e abra o app com internet e tente de novo. Hoje em uso: '+antes+' KB.</span>';
+  }else{
+    msg='<span class="status off">Não havia foto antiga para apagar (em uso: '+antes+' KB). '+
+        'As fichas em aberto estão ocupando o espaço — avise a Suzana.</span>';
+  }
+  /* A lista por tamanho vai junto, sempre. É ela que diz se o problema são as
+     fotos, a fila de envio ou a lista em si — e evita mais um dia de palpite. */
+  var det=_ocupacao().slice(0,6).map(function(x){
+    return x.chave+': '+x.kb+' KB';
+  }).join('<br>');
+  if(s)s.innerHTML=msg+'<div style="margin-top:8px;font-size:11px;font-family:ui-monospace,Consolas,monospace;'+
+    'background:#111;color:#eee;border-radius:8px;padding:8px 10px;line-height:1.6">'+
+    'O QUE ESTÁ OCUPANDO (total '+depois+' KB)<br>'+det+'</div>';
+  toast(libertou>0?('Liberei '+libertou+' KB'):'Nada a liberar');
 }
 function salvarLocal(d){
   let arr; try{arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){arr=[];}
@@ -4207,7 +4269,7 @@ function reenviar(id){
 function excluirRec(id){
   if(!confirm('Excluir este recebimento? Apaga do aparelho e da planilha.'))return;
   let arr=JSON.parse(localStorage.getItem('petro_receb')||'[]').filter(a=>String(a.id)!==String(id));
-  localStorage.setItem('petro_receb',JSON.stringify(arr));
+  _guardaReceb(arr);   // 02/10/2026 — era setItem cru: aparelho cheio travava a exclusão no meio
   LISTA_ATUAL=LISTA_ATUAL.filter(a=>String(a.id)!==String(id));
   if(SHEET_URL)postSheet(SHEET_URL,{action:'excluir',id:id});
   renderFromArray(LISTA_ATUAL,document.getElementById('origemLbl').textContent,ACOES_ATUAL);toast('Excluído');
@@ -4223,7 +4285,17 @@ function marcarAtendido(id){
   var now=Date.now();
   let arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');
   arr.forEach(a=>{if(String(a.id)===String(id)){a.status='Atendido';a.statusEm=now;a.updatedAt=now;}});
-  localStorage.setItem('petro_receb',JSON.stringify(arr));
+  /* ⚠️ 02/10/2026 — APARELHO CHEIO NÃO PODE TRAVAR A FINALIZAÇÃO.
+     Esta gravação era `localStorage.setItem` cru, sem proteção. Com a memória
+     do navegador cheia ela estoura, a função morre AQUI e nunca chega no
+     `postSheet` logo abaixo: a pessoa clica em "finalizar", leva um erro de
+     memória do navegador na cara e a ficha não é concluída em lugar nenhum —
+     nem no aparelho, nem na planilha. Foi a queixa da manhã de 02/10
+     ("não consigo finalizar as admissões").
+     Agora grava pelo `_guardaReceb`, que tem os socorros, e SEGUE mesmo se o
+     aparelho não tiver onde guardar: quem manda é a planilha, e a ação precisa
+     chegar lá. Guardar no aparelho é conveniência, não é o registro. */
+  _guardaReceb(arr);
   LISTA_ATUAL.forEach(a=>{if(String(a.id)===String(id)){a.status='Atendido';a.statusEm=now;a.updatedAt=now;}});
   if(SHEET_URL)postSheet(SHEET_URL,{action:'status',id:id,status:'Atendido'});
   if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
