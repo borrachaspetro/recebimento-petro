@@ -651,7 +651,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v64';
+const APP_VERSAO='v65';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -5251,11 +5251,46 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
     messagingSenderId: "448332503794",
     appId: "1:448332503794:web:3d93ac9dfdb5ed99930e6b"
   };
-  var KEY='petro_receb', TKEY='petro_tumbas';
+  var KEY='petro_receb', TKEY='petro_tumbas', AKEY='petro_arquivadas';
   var fdoc=null,_fbReady=false,_fbTimer=null,_fbAplicando=false;
   function _getReceb(){ try{return JSON.parse(localStorage.getItem(KEY)||'[]');}catch(e){return [];} }
   function _getTumbas(){ try{return JSON.parse(localStorage.getItem(TKEY)||'[]');}catch(e){return [];} }
   function _setTumbas(t){ try{localStorage.setItem(TKEY,JSON.stringify(t));}catch(e){} }
+  /* ═══ MARCA DE ARQUIVADA — 02/10/2026 ═══════════════════════════════════
+     O arquivamento tirou 195 fichas da planilha e dos aparelhos, e elas
+     voltavam todas. O envio para a nuvem faz LER → JUNTAR → GRAVAR (regra de
+     agosto, para um aparelho atrasado não apagar o trabalho dos outros), e
+     juntar nunca remove: o aparelho tirava as arquivadas na leitura da
+     planilha, publicava, a nuvem devolvia as 195, e ele as gravava de volta em
+     si mesmo. Medido em 02/10: o mesmo aparelho oscilando entre 190 e 385.
+
+     A correção é dizer à nuvem o que foi arquivado. NÃO dá para usar a lápide
+     de exclusão: lápide é definitiva, e ficha arquivada tem de poder voltar se
+     um dia alguém desarquivar. Por isso uma lista própria:
+
+       · entra na lista quando a ficha some da planilha E casa com a regra;
+       · SAI da lista no instante em que a planilha devolver a ficha de novo —
+         é isso que faz o desarquivamento funcionar sozinho;
+       · viaja no payload, então todos os aparelhos ficam sabendo;
+       · na mesclagem vale a mesma conta da lápide (`updatedAt <= ts`), para
+         que editar a ficha depois de arquivada a traga de volta.           */
+  function _getArq(){ try{return JSON.parse(localStorage.getItem(AKEY)||'[]');}catch(e){return [];} }
+  function _setArq(a){ try{localStorage.setItem(AKEY,JSON.stringify(a||[]));}catch(e){} }
+  function _fundirArq(a,b){
+    var por={}, out=[];
+    (a||[]).concat(b||[]).forEach(function(x){
+      if(!x||x.id==null)return;
+      var k=String(x.id);
+      if(!por[k] || (x.ts||0)>(por[k].ts||0)) por[k]={id:x.id,ts:x.ts||0};
+    });
+    Object.keys(por).forEach(function(k){ out.push(por[k]); });
+    return out;
+  }
+  /* Tira da lista as fichas que a planilha voltou a mostrar. */
+  function _arqSemAsQueVoltaram(arq,naPlanilha){
+    if(!naPlanilha)return arq||[];
+    return (arq||[]).filter(function(x){ return !(x&&x.id!=null&&naPlanilha[String(x.id)]); });
+  }
   try{
     if(typeof firebase==='undefined') throw new Error('SDK do Firebase não carregou');
     if(!firebaseConfig.projectId || firebaseConfig.projectId==='SEU_PROJETO') throw new Error('firebaseConfig ainda não preenchido');
@@ -5267,7 +5302,10 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
 
   function _sig(arr){ return (arr||[]).map(function(r){return (r&&r.id)+':'+((r&&r.updatedAt)||0);}).sort().join('|'); }
 
-  function _mesclar(localArr,nuvemArr,tumbas){
+  /* `arq` = marcas de arquivamento (ver o bloco "MARCA DE ARQUIVADA"). Entram
+     na mesma conta das lápides, por isso são aplicadas junto: o que muda entre
+     as duas é só o ciclo de vida da marca, não o efeito na mesclagem. */
+  function _mesclar(localArr,nuvemArr,tumbas,arq){
     var map={},extras=[];
     (nuvemArr||[]).forEach(function(r){ if(r&&r.id!=null) map[r.id]=r; else if(r) extras.push(r); });
     (localArr||[]).forEach(function(r){
@@ -5276,7 +5314,8 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       var c=map[r.id];
       if(!c || ((r.updatedAt||0) > (c.updatedAt||0))) map[r.id]=r;
     });
-    (tumbas||[]).forEach(function(t){
+    (tumbas||[]).concat(arq||[]).forEach(function(t){
+      if(!t||t.id==null) return;
       var r=map[t.id];
       if(r && ((r.updatedAt||0) <= t.ts)) delete map[t.id];
     });
@@ -5289,7 +5328,13 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
     var tumbasLocal = _getTumbas();
     var todas = tumbasLocal.concat(tumbasNuvem);
     var local = _getReceb();
-    var merged = _mesclar(local, d.receb, todas);
+    /* As marcas de arquivamento chegam junto e valem na mesclagem: sem isto, o
+       aviso de outro aparelho devolvia as 195 fichas arquivadas para dentro
+       deste, que as tirava de novo na leitura seguinte da planilha — o
+       vai-e-vem entre 190 e 385 medido em 02/10/2026. */
+    var arq = _fundirArq(_getArq(), d._arq||[]);
+    _setArq(arq);
+    var merged = _mesclar(local, d.receb, todas, arq);
     _preservarFotos(local, merged); // fotos não trafegam pelo Firebase — mantém as locais
     if(typeof _preservarAcab==='function')_preservarAcab(local, merged); // e o acabamento estruturado
     // funde as lápides novas da nuvem
@@ -5358,7 +5403,13 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       var remote={receb:[],_tumbas:[]};
       if(snap && snap.exists){ var dd=snap.data(); if(dd&&dd.payload){ try{ remote=JSON.parse(dd.payload); }catch(e){} } }
       var tumbas=tumbasL.concat(remote._tumbas||[]);
-      var mergedReceb=_mesclar(receb, remote.receb||[], tumbas);
+      /* A marca de arquivamento sobe junto com os dados. É ela que leva a
+         remoção adiante: "juntar" sozinho nunca remove, e sem isso a nuvem
+         ficaria com as 195 fichas arquivadas para sempre (medido: 500 KB de
+         1.024 que não baixavam). */
+      var arq=_fundirArq(_getArq(), remote._arq||[]);
+      _setArq(arq);
+      var mergedReceb=_mesclar(receb, remote.receb||[], tumbas, arq);
       var seen={}, mergedTumbas=[];
       tumbas.forEach(function(t){ if(t&&t.id!=null){ var k=t.id+'|'+t.ts; if(!seen[k]){ seen[k]=1; mergedTumbas.push(t); } } });
       _preservarFotos(receb, mergedReceb); // mantém as fotos locais no que voltou da nuvem
@@ -5367,7 +5418,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       try{ localStorage.setItem(KEY, JSON.stringify(mergedReceb)); }catch(e){}
       _setTumbas(mergedTumbas);
       _fbAplicando=false;
-      var _pl=JSON.stringify({ receb:_semFotos(mergedReceb), _tumbas:mergedTumbas });
+      var _pl=JSON.stringify({ receb:_semFotos(mergedReceb), _tumbas:mergedTumbas, _arq:arq });
       _fbAvisarTamanho(_pl);
       fdoc.set({ payload: _pl, updatedAt: Date.now() })
         .then(function(){ _fbFalhou=false; })
@@ -5375,7 +5426,7 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       if(typeof renderSaved==='function' && _sig(mergedReceb)!==_sig(receb)) renderSaved();
     }).catch(function(){
       // se não conseguiu ler a nuvem, grava direto (comportamento antigo) para não travar
-      fdoc.set({ payload: JSON.stringify({ receb:_semFotos(receb), _tumbas:tumbasL }), updatedAt: Date.now() }).catch(function(){});
+      fdoc.set({ payload: JSON.stringify({ receb:_semFotos(receb), _tumbas:tumbasL, _arq:_getArq() }), updatedAt: Date.now() }).catch(function(){});
     });
   }
   function _fbAgendar(){ clearTimeout(_fbTimer); _fbTimer=setTimeout(_fbEnviar, 1200); }
@@ -5440,7 +5491,26 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       var naPlanilha={};
       for(var _i=0;_i<cloudArr.length;_i++){ var _r=cloudArr[_i]; if(_r&&_r.id!=null)naPlanilha[String(_r.id)]=1; }
       var vivos=(typeof _tirarArquivadas==='function')?_tirarArquivadas(local,naPlanilha):local;
-      var merged=_mesclar(vivos, cloudArr, _getTumbas()); // planilha entra; local (mais novo) prevalece; lápides removem
+      /* A LEITURA DA PLANILHA É A ÚNICA DONA DA MARCA — 02/10/2026.
+         Aqui, e só aqui, a marca nasce e morre, porque é o único lugar que sabe
+         o que a planilha tem AGORA:
+           · nasce  → a ficha sumiu da planilha e casa com a regra: foi para o
+                      Histórico, e a marca avisa os outros aparelhos;
+           · morre  → a ficha voltou a aparecer na planilha: alguém desarquivou,
+                      e a marca sai na hora, senão o desarquivamento nunca
+                      chegaria na tela de ninguém.
+         Fazer isso em qualquer outro ponto seria marcar como arquivada uma
+         ficha que apenas ainda não chegou — e aí some trabalho de verdade. */
+      var arqNovas=[], agora=Date.now();
+      for(var _j=0;_j<local.length;_j++){
+        var _x=local[_j];
+        if(_x&&_x.id!=null&&!naPlanilha[String(_x.id)]&&typeof _eArquivada==='function'&&_eArquivada(_x)){
+          arqNovas.push({id:_x.id, ts:agora});
+        }
+      }
+      var arq=_arqSemAsQueVoltaram(_fundirArq(_getArq(),arqNovas), naPlanilha);
+      _setArq(arq);
+      var merged=_mesclar(vivos, cloudArr, _getTumbas(), arq); // planilha entra; local (mais novo) prevalece; lápides e marcas removem
       _preservarFotos(vivos, merged);                     // mantém as fotos locais
       if(typeof _preservarAcab==='function')_preservarAcab(vivos, merged); // e o acabamento estruturado (tipo de friso)
       if(_sig(merged)===_sig(local)) return;              // nada novo
