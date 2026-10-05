@@ -651,7 +651,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v65';
+const APP_VERSAO='v66';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3668,6 +3668,27 @@ var _ESPERA_PLANILHA=30000;
    ZERADO e os 30 segundos inteiros — nunca com as sobras do outro. */
 var _ESPERA_POST=8000;
 
+/* ═══ O APARELHO LEMBRA QUAL CAMINHO NÃO FUNCIONA — 05/10/2026 ═════════════
+   Diagnóstico da máquina da Mariane: o POST falha SEMPRE, em 8 s, e a reserva
+   responde em 5,2 s. Ou seja, cada atualização custava 13,2 segundos, dos quais
+   8 eram jogados fora esperando um caminho que naquela máquina nunca vai dar
+   certo. Com o relógio de 45 s, isso fazia a ficha de outra pessoa levar quase
+   um minuto para aparecer — e ela fechava e abria o app, porque carregar do
+   zero era mais rápido que esperar.
+
+   Agora, quando o POST falha, o aparelho anota a hora e passa meia hora indo
+   direto na reserva. Passada a meia hora ele tenta o POST de novo, porque a
+   rede pode ter sido arrumada e o caminho preferido (o crachá viaja no corpo,
+   não no endereço) tem de voltar sozinho assim que der.
+
+   NÃO é para tratar como "esse aparelho é ruim e pronto": é descanso, não
+   desistência. Por isso meia hora, e não para sempre. */
+var _POST_DESCANSO=30*60*1000;
+var _postFalhouEm=0;
+function _postEmDescanso(){
+  return _postFalhouEm>0 && (Date.now()-_postFalhouEm)<_POST_DESCANSO;
+}
+
 /* Assinatura leve da lista, só para saber se vale gravar. Compara id, etapa,
    status e a hora da última mexida — nunca o conteúdo inteiro, que tem foto
    dentro e custaria caro a cada leitura. */
@@ -3927,10 +3948,16 @@ function diagnosticoLeitura(){
     })
     .catch(function(e){ diz('    FALHOU: '+e.message); })
     .then(function(){
-      t0=Date.now(); diz('2/3 caminho novo (POST)…');
+      t0=Date.now();
+      diz('2/3 caminho novo (POST)…'+(_postEmDescanso()?' [em descanso neste aparelho]':''));
+      /* O diagnóstico SEMPRE testa as duas pernas, mesmo em descanso: é ele
+         que diz se a rede foi arrumada. */
       return _comPrazo(_lerPorPost(),20000,'o caminho novo')
-        .then(function(arr){ trouxe=trouxe||arr; diz('    ok: '+arr.length+' registro(s) em '+seg(t0)); })
-        .catch(function(e){ diz('    FALHOU em '+seg(t0)+': '+e.message); });
+        .then(function(arr){ trouxe=trouxe||arr; _postFalhouEm=0;
+          diz('    ok: '+arr.length+' registro(s) em '+seg(t0)); })
+        .catch(function(e){ _postFalhouEm=Date.now();
+          diz('    FALHOU em '+seg(t0)+': '+e.message);
+          diz('    (as próximas leituras vão direto no caminho antigo por 30 min,'); diz('     para não gastar esse tempo à toa)'); });
     })
     .then(function(){
       t0=Date.now(); diz('3/3 caminho antigo (reserva)…');
@@ -4142,13 +4169,19 @@ function carregarNuvem(tent,jaTenho){
     var _f0=window[cb]; if(typeof _f0==='function')_f0(jaTenho);
     return;
   }
+  /* Neste aparelho o POST já falhou há pouco: não gasta os 8 segundos de novo,
+     vai direto na reserva. Ver o bloco "O APARELHO LEMBRA QUAL CAMINHO NÃO
+     FUNCIONA". */
+  if(_postEmDescanso()){ _reservaJsonp(); return; }
   /* CAMINHO PREFERIDO: POST com CORS, crachá no corpo — nada em endereço. */
   _lerPorPost().then(function(arr){
     if(_fim)return;
+    _postFalhouEm=0;                 // voltou a funcionar: sai do descanso
     var f=window[cb]; if(typeof f==='function')f(arr);
   }).catch(function(){
     // alguns navegadores/proxies barram o POST com CORS no Apps Script
     console.warn('[Petro] leitura por POST indisponível — usando o caminho antigo');
+    _postFalhouEm=Date.now();        // anota, para as próximas irem diretas
     if(!_fim)_reservaJsonp();
   });
 }
@@ -4173,15 +4206,27 @@ window.addEventListener('online',function(){
    tocados, e o carregarNuvem já tem trava para não empilhar leituras. */
 (function(){
   if(!SHEET_URL)return;
+  /* ⏱ O RELÓGIO ENCURTOU — 05/10/2026, queixa da Mariane ("atualiza lento").
+     Os 90 segundos foram escolhidos quando a planilha tinha ~600 linhas e cada
+     leitura pesava. Depois do arquivamento ela tem ~190, então dá para olhar
+     com mais frequência pelo mesmo custo de antes.
+
+     POR QUE NÃO BAIXAR MAIS DO QUE ISSO: cada leitura gasta tempo de execução
+     do Apps Script, e esse tempo tem cota DIÁRIA. Com vários aparelhos abertos,
+     dividir o intervalo por três multiplicaria por três o consumo — e estourar
+     a cota derruba a leitura de TODO MUNDO, que é bem pior do que esperar. Por
+     isso 45 s, e não 15 s, e por isso o piso logo abaixo continua existindo.
+     O `vigiaDiario` da planilha mede o tempo de leitura todo dia e avisa por
+     e-mail quando apertar: é ele que diz se dá para baixar mais. */
   var _ultima=0;
   function _atualizar(motivo){
     if(document.hidden)return;                 // aba escondida não precisa gastar chamada
     var agora=Date.now();
-    if(agora-_ultima<20000)return;             // no máximo uma a cada 20s, venha de onde vier
+    if(agora-_ultima<10000)return;             // piso: no máximo uma a cada 10s, venha de onde vier
     _ultima=agora;
     try{ carregarNuvem(); }catch(e){ console.warn('[Petro] atualização automática ('+motivo+'):',e); }
   }
-  setInterval(function(){ _atualizar('relógio'); },90000);
+  setInterval(function(){ _atualizar('relógio'); },45000);
   document.addEventListener('visibilitychange',function(){ if(!document.hidden)_atualizar('voltou à aba'); });
   window.addEventListener('focus',function(){ _atualizar('voltou o foco'); });
 })();
