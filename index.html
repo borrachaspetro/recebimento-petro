@@ -544,6 +544,12 @@
     <!-- 02/10/2026 — quando o navegador diz que não há memória para concluir
          a operação. Apaga só a cópia das fotos já guardadas no Firebase. -->
     <button class="btn" style="width:100%;background:#eee;margin-top:8px" onclick="liberarEspaco()">🧹 Liberar espaço neste aparelho</button>
+    <!-- ⚠️ 06/10/2026 — o resultado tem de nascer AQUI, colado no botão.
+         Antes ele ia para o #cfgStatus, lá no alto da janela. No computador
+         dá para ver os dois; no celular a pessoa está rolada aqui embaixo e o
+         resultado aparece fora da tela. O Emerson apertou e escreveu "não está
+         habilitado" — e estava certo, do ponto de vista dele. -->
+    <div id="cfgEspaco" style="margin-top:8px"></div>
     <div id="cfgDiag" style="margin-top:8px"></div>
     <button class="btn" style="width:100%;background:#fdecea;color:#C0392B;margin-top:10px" onclick="if(window._appLogout)_appLogout()">Sair (deslogar deste aparelho)</button>
   </div>
@@ -651,7 +657,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v67';
+const APP_VERSAO='v68';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3503,7 +3509,7 @@ function liberarEspaco(){
   _limparFotosAntigas();   // 2 dias — ver DIAS_FOTO_LOCAL
   var depois=_tamanhoGuardado();
   var libertou=antes-depois;
-  var s=document.getElementById('cfgStatus');
+  var s=document.getElementById('cfgEspaco');   // colado no botão — ver o comentário no HTML
   var msg;
   if(libertou>0){
     msg='<span class="status on">✓ Liberei '+libertou+' KB (de '+antes+' para '+depois+' KB). '+
