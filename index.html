@@ -651,7 +651,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v66';
+const APP_VERSAO='v67';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3403,8 +3403,25 @@ function wrapText(ctx,text,x0,y0,maxW,lh){const w=(text||'').split(' ');let l=''
    Agora só é apagado o que a nuvem CONFIRMOU ter recebido. Se a confirmação
    não existe — ou se o módulo de fotos ainda nem carregou — nada é apagado.
    Ocupar memória é problema pequeno; perder foto de recebimento não é. */
+/* ⚠️ 06/10/2026 — A JANELA DE 30 DIAS VIROU O PROBLEMA.
+   Medido no computador da Mariane: `petro_receb` com **5.066 KB**, de um limite
+   de ~5.000 KB que o navegador dá ao app. Memória em 100%, e o botão de liberar
+   espaço respondendo "não havia foto antiga para apagar".
+
+   O motivo: esta limpeza só mexia em ficha com mais de 30 dias. Depois do
+   arquivamento (02/10) as fichas antigas saíram da lista, e sobrou só coisa
+   recente — ou seja, a regra passou a proteger exatamente tudo o que restou.
+   Com a memória cheia o app não consegue guardar a lista nova, a tela volta
+   sempre para a lista velha guardada, e é isso que a equipe via como "fica
+   oscilando" e "sumiu ficha da manhã".
+
+   DOIS DIAS BASTAM, e não é arriscado: só se apaga foto que o Firebase
+   CONFIRMOU ter recebido (`_fotosSincronizadas`, que só é marcada depois do
+   envio dar certo), e o app baixa a foto de volta da nuvem quando a ficha é
+   aberta. A cópia local é conveniência, não é o original. */
+var DIAS_FOTO_LOCAL=2;
 function _limparFotosAntigas(dias){
-  dias=dias||30; const limite=Date.now()-dias*864e5;
+  dias=dias||DIAS_FOTO_LOCAL; const limite=Date.now()-dias*864e5;
   let arr; try{arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){return;}
   var subiu={};
   try{
@@ -3434,10 +3451,16 @@ function _semTodasFotos(arr){
     return c;});
 }
 // grava com proteção contra memória cheia (nunca deixa travar o envio)
+/* Acima disto, limpa ANTES de gravar — não espera estourar. O estouro não é
+   só um aviso: quando ele acontece a lista nova não é guardada, e a tela passa
+   a alternar entre o que está guardado (velho) e o que acabou de ser lido.
+   06/10/2026. */
+var FOLGA_KB=3000;
 function _guardaReceb(arr){
+  try{ if(typeof _tamanhoGuardado==='function' && _tamanhoGuardado()>FOLGA_KB) _limparFotosAntigas(); }catch(e){}
   try{ localStorage.setItem('petro_receb',JSON.stringify(arr)); return true; }
   catch(e){
-    _limparFotosAntigas(30);
+    _limparFotosAntigas();
     try{ localStorage.setItem('petro_receb',JSON.stringify(arr)); return true; }catch(e2){}
     try{ localStorage.setItem('petro_receb',JSON.stringify(_semTodasFotos(arr)));
       toast('Memória do aparelho cheia — salvei sem as fotos (elas já foram no e-mail).'); return true; }catch(e3){}
@@ -3477,7 +3500,7 @@ function _ocupacao(){
 function liberarEspaco(){
   var antes=_tamanhoGuardado();
   var conferiu=(typeof window._fotosSincronizadas==='function');
-  _limparFotosAntigas(30);
+  _limparFotosAntigas();   // 2 dias — ver DIAS_FOTO_LOCAL
   var depois=_tamanhoGuardado();
   var libertou=antes-depois;
   var s=document.getElementById('cfgStatus');
@@ -3490,8 +3513,9 @@ function liberarEspaco(){
         'fotos já subiram, e eu não apago foto sem essa confirmação. '+
         'Feche e abra o app com internet e tente de novo. Hoje em uso: '+antes+' KB.</span>';
   }else{
-    msg='<span class="status off">Não havia foto antiga para apagar (em uso: '+antes+' KB). '+
-        'As fichas em aberto estão ocupando o espaço — avise a Suzana.</span>';
+    msg='<span class="status off">Não havia foto para apagar (em uso: '+antes+' KB). '+
+        'Ou as fotos destes dias ainda não terminaram de subir para a nuvem — e aí eu não apago '+
+        'mesmo —, ou o espaço está sendo ocupado por outra coisa. Me mande a lista abaixo.</span>';
   }
   /* A lista por tamanho vai junto, sempre. É ela que diz se o problema são as
      fotos, a fila de envio ou a lista em si — e evita mais um dia de palpite. */
@@ -5163,7 +5187,7 @@ try{var _cv=document.getElementById('codVer'); if(_cv)_cv.textContent='R 02-1 ·
 /* Roda só depois de o módulo de fotos carregar (fica no fim do arquivo) e ter
    tempo de tentar subir a fila. Cedo demais, _fotosSincronizadas ainda não
    existe e a limpeza não apagaria nada — seguro, mas nunca limparia. */
-setTimeout(function(){ try{ _limparFotosAntigas(30); }catch(e){} },20000);
+setTimeout(function(){ try{ _limparFotosAntigas(); }catch(e){} },20000);   // 2 dias — ver DIAS_FOTO_LOCAL
 _pendAtualiza();
 if(SHEET_URL)setTimeout(function(){filaEnviar(false);},2500); // sobe o que ficou pendente de sessões anteriores
 /* Cada passo isolado. O formulário (addPeca) NÃO pode depender de a lista
