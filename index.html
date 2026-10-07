@@ -659,7 +659,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v71';
+const APP_VERSAO='v72';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3441,19 +3441,36 @@ function _limparFotosAntigas(dias){
     const ts=Number(d&&d.id)||0;
     if(ts&&ts<limite&&subiu[String(d&&d.id)]){
       if(d.fotos&&d.fotos.length){d.fotos=[];mudou=true;}
+      /* ⚠️ 07/10/2026 — ESTAS DUAS FALTAVAM, E ERAM AS MAIORES.
+         `fotosPeca` é a foto de cada peça (o passo 7 da ficha) e `assinatura`
+         é a do cliente. Nunca foram apagadas daqui. Resultado: o botão dizia
+         "não havia foto para apagar" com 5 MB de foto na frente dele, porque
+         olhava só para os lugares pequenos. Foi o que encheu a memória das três
+         máquinas e consumiu a semana de 01 a 07/10.
+         As duas sobem para o Storage (estão em `_slots`) e voltam de lá quando
+         a ficha é aberta — por isso apagar a cópia local é seguro, com a mesma
+         condição de sempre: só de ficha CONFIRMADA. */
       (d.pecas||[]).forEach(p=>{
+        if(p.fotosPeca&&p.fotosPeca.length){p.fotosPeca=[];mudou=true;}
         if(p.desenhoFoto){p.desenhoFoto='';mudou=true;}
         (p.ponteiras||[]).forEach(x=>{if(x.foto){x.foto='';mudou=true;}});
         (p.furos||[]).forEach(x=>{if(x.foto){x.foto='';mudou=true;}});
       });
+      if(d.assinatura){d.assinatura='';mudou=true;}
     }
   });
   if(mudou){try{localStorage.setItem('petro_receb',JSON.stringify(arr));}catch(e){}}
 }
-// tira as fotos de TODOS os registros (última tentativa quando a memória enche)
+/* Tira as fotos de TODOS os registros — última tentativa quando a memória
+   enche. 07/10/2026: `fotosPeca` e `assinatura` entraram aqui também. Sem elas
+   este socorro mal tirava peso, porque o grosso das imagens está justamente
+   nessas duas — e a gravação falhava assim mesmo.
+   ⚠️ Este é o degrau FINAL e ele não pergunta se a foto subiu: a alternativa é
+   não gravar nada. Quem avisa antes de chegar aqui é a faixa de memória
+   (`_avisoMemoria`), que alerta sobre foto não enviada enquanto dá tempo. */
 function _semTodasFotos(arr){
-  return arr.map(d=>{const c=Object.assign({},d);c.fotos=[];
-    if(c.pecas)c.pecas=c.pecas.map(p=>{const pp=Object.assign({},p);pp.desenhoFoto='';
+  return arr.map(d=>{const c=Object.assign({},d);c.fotos=[];c.assinatura='';
+    if(c.pecas)c.pecas=c.pecas.map(p=>{const pp=Object.assign({},p);pp.desenhoFoto='';pp.fotosPeca=[];
       if(pp.ponteiras)pp.ponteiras=pp.ponteiras.map(x=>Object.assign({},x,{foto:''}));
       if(pp.furos)pp.furos=pp.furos.map(x=>Object.assign({},x,{foto:''}));return pp;});
     return c;});
