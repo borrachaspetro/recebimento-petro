@@ -657,7 +657,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v68';
+const APP_VERSAO='v69';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -5776,6 +5776,21 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
       _pasta(d.id).listAll().then(function(res){
         var itens=res.items||[];
         if(!itens.length) throw new Error('vazio');
+        var naNuvem={}; itens.forEach(function(it){ naNuvem[it.name.replace(/\.[a-z]+$/i,'')]=1; });
+        /* ⚠️ 06/10/2026 — QUEM SÓ BAIXA FOTO NUNCA PODIA LIMPAR.
+           A limpeza da cópia local só apaga foto que o app CONFIRMOU estar na
+           nuvem, e essa confirmação (`_marcaSync`) só era dada por quem ENVIA.
+           O computador da Mariane nunca enviou uma foto na vida — ele só baixa,
+           ao abrir ficha e gerar PDF — então ficou com 5.070 KB de fotos que
+           nunca podiam ser apagadas, e a memória no teto.
+           Aqui a confirmação é PROVA, não suposição: acabamos de listar o que
+           existe no Storage. Se toda foto que este aparelho tem já está lá, a
+           cópia daqui é dispensável — e o download que vem a seguir só
+           acrescenta foto que veio de lá, então a conta continua valendo. */
+        try{
+          var locais=_slots(d);
+          if(locais.length && locais.every(function(x){ return naNuvem[x.slot]; })) _marcaSync(d.id);
+        }catch(e){}
         var faltam=itens.filter(function(it){
           return !_slotPreenchido(d,it.name.replace(/\.[a-z]+$/i,''));
         });
