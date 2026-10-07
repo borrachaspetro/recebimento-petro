@@ -469,6 +469,8 @@
       <div class="body">
         <!-- Faixa de "lista velha" — 01/10/2026. Fica vazia enquanto a leitura
              da planilha vai bem; ver _avisoLista(). -->
+        <!-- Faixa da memória do aparelho — 07/10/2026. Ver _avisoMemoria(). -->
+        <div id="avisoMemoria" style="display:none"></div>
         <div id="avisoLista" style="display:none"></div>
         <div class="hint" style="margin-top:0">Quando conectado à planilha, mostra os registros de todos os aparelhos. Sem internet, mostra os deste aparelho.</div>
         <div class="sfiltro" id="statusFiltro">
@@ -657,7 +659,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v70';
+const APP_VERSAO='v71';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -3462,9 +3464,97 @@ function _semTodasFotos(arr){
    a alternar entre o que está guardado (velho) e o que acabou de ser lido.
    06/10/2026. */
 var FOLGA_KB=3000;
+
+/* ═══ A MEMÓRIA CHEIA TEM DE APARECER — 07/10/2026 ═════════════════════════
+   A semana de 01 a 07/10 foi atrás de rede, antivírus e login, e a causa era
+   a memória do navegador no teto nas máquinas do comercial. O app NUNCA disse
+   isso: continuava anunciando "✓ Conectada — 214 registros" enquanto não
+   conseguia guardar nada. O defeito não foi encher — foi encher em silêncio.
+   É a mesma lição de 01/10, quando a lista envelhecia sem avisar: naquela vez
+   consertei o aviso da sincronização e não olhei para o resto.
+
+   Três estados, e o terceiro é o que ninguém estava olhando:
+     'quase'      — passou de 70%: avisa antes de quebrar, não depois.
+     'nao-gravou' — não coube. Vira FAIXA, não aviso que some: nenhum dos
+                    avisos desta semana foi visto por ninguém.
+     'sem-liberar'— ALARME. A limpeza não achou nada para apagar com a memória
+                    cheia. Isso não é falta de espaço: a limpeza só mexe em foto
+                    CONFIRMADA na nuvem, então "não há o que apagar" quer dizer
+                    que há FOTO QUE NUNCA SUBIU. É foto num lugar só, em risco
+                    de se perder. Apareceu nos dois computadores esta semana e
+                    eu li como "não tem o que limpar". */
+var LIMITE_AVISO_KB=3500;      // ~70% dos ~5.000 KB que o navegador concede
+function _fotosSemSubir(){
+  var arr=[]; try{ arr=JSON.parse(localStorage.getItem('petro_receb')||'[]'); }catch(e){ return 0; }
+  var subiu={};
+  try{ ((window._fotosSincronizadas&&window._fotosSincronizadas())||[]).forEach(function(x){ subiu[String(x)]=1; }); }catch(e){}
+  var n=0;
+  arr.forEach(function(d){
+    if(!d||d.id==null||subiu[String(d.id)])return;
+    var tem=!!(d.assinatura)||!!((d.fotos||[]).length);
+    (d.pecas||[]).forEach(function(p){
+      if(!p)return;
+      if((p.fotosPeca||[]).length||p.desenhoFoto)tem=true;
+      (p.ponteiras||[]).forEach(function(x){ if(x&&x.foto)tem=true; });
+      (p.furos||[]).forEach(function(x){ if(x&&x.foto)tem=true; });
+    });
+    if(tem)n++;
+  });
+  return n;
+}
+function _tentarSubirFotos(){
+  var arr=[]; try{ arr=JSON.parse(localStorage.getItem('petro_receb')||'[]'); }catch(e){}
+  if(typeof window._fotosGarantirNuvem!=='function'){ toast('O envio de fotos não está disponível agora'); return; }
+  toast('Tentando enviar as fotos…');
+  try{ window._fotosGarantirNuvem(arr); }catch(e){}
+  setTimeout(function(){
+    var n=_fotosSemSubir();
+    toast(n?('Ainda faltam '+n+' ficha(s) — deixe o app aberto'):'Todas as fotos subiram ✓');
+    _avisoMemoria();
+  },8000);
+}
+function _avisoMemoria(estado){
+  var box=document.getElementById('avisoMemoria'); if(!box)return;
+  var kb=(typeof _tamanhoGuardado==='function')?_tamanhoGuardado():0;
+  if(!estado){ estado=(kb>LIMITE_AVISO_KB)?'quase':''; }
+  if(!estado){ box.innerHTML=''; box.style.display='none'; return; }
+  var titulo,texto,botoes,cor;
+  if(estado==='sem-liberar'){
+    var n=_fotosSemSubir();
+    cor='#C0392B';
+    titulo='⚠️ Há fotos que ainda não subiram para o sistema';
+    texto='A memória deste aparelho está em <b>'+kb+' KB</b> e não há nada que eu possa apagar com segurança — '+
+          'eu só apago cópia de foto que já está guardada no sistema. '+
+          (n?('São <b>'+n+' ficha(s)</b> com foto que existe <b>só aqui</b>. '):'')+
+          'Enquanto não subirem, elas estão num lugar só.';
+    botoes='<button class="btn" style="background:'+cor+';color:#fff;font-weight:800;border:0;border-radius:8px;'+
+      'padding:8px 12px;cursor:pointer" onclick="_tentarSubirFotos()">📤 Tentar enviar agora</button>';
+  }else if(estado==='nao-gravou'){
+    cor='#C0392B';
+    titulo='⚠️ Este aparelho não conseguiu guardar a lista';
+    texto='A memória está cheia ('+kb+' KB). O que você fez <b>foi para a planilha</b> — mas esta tela pode '+
+          'voltar a mostrar dados antigos até liberar espaço.';
+    botoes='<button class="btn" style="background:var(--amarelo);color:#111;font-weight:800;border:0;border-radius:8px;'+
+      'padding:8px 12px;cursor:pointer" onclick="abrirConfig();setTimeout(liberarEspaco,400)">🧹 Liberar espaço</button>';
+  }else{
+    cor='#8a5200';
+    titulo='A memória deste aparelho está enchendo';
+    texto='Em uso: <b>'+kb+' KB</b> de cerca de 5.000. Quando lota, a lista para de atualizar — '+
+          'melhor liberar agora do que descobrir depois.';
+    botoes='<button class="btn" style="background:var(--amarelo);color:#111;font-weight:800;border:0;border-radius:8px;'+
+      'padding:8px 12px;cursor:pointer" onclick="abrirConfig();setTimeout(liberarEspaco,400)">🧹 Liberar espaço</button>';
+  }
+  box.style.display='block';
+  box.innerHTML='<div style="background:#FFFBEA;border:2px solid var(--amarelo);border-left:6px solid '+cor+';'+
+    'border-radius:10px;padding:10px 12px;margin:0 0 10px;font-size:12px;line-height:1.45">'+
+    '<b style="color:'+cor+'">'+titulo+'</b><br>'+texto+
+    '<div style="margin-top:8px">'+botoes+'</div></div>';
+}
 function _guardaReceb(arr){
   try{ if(typeof _tamanhoGuardado==='function' && _tamanhoGuardado()>FOLGA_KB) _limparFotosAntigas(); }catch(e){}
-  try{ localStorage.setItem('petro_receb',JSON.stringify(arr)); return true; }
+  try{ localStorage.setItem('petro_receb',JSON.stringify(arr));
+       try{ _avisoMemoria(); }catch(e){}     // gravou: avisa só se estiver enchendo
+       return true; }
   catch(e){
     _limparFotosAntigas();
     try{ localStorage.setItem('petro_receb',JSON.stringify(arr)); return true; }catch(e2){}
@@ -3474,8 +3564,11 @@ function _guardaReceb(arr){
        quem chama este gravador manda para lá em seguida, e é lá que fica o
        registro. O aviso tem de dizer isso e dizer o que fazer, senão a pessoa
        conclui (com razão) que perdeu o trabalho. 02/10/2026. */
-    toast('Memória deste aparelho cheia. A ação foi para a planilha mesmo assim — '+
-          'abra a ⚙️ e toque em "Liberar espaço".');
+    /* FAIXA, não aviso que some — 07/10/2026. Esta mensagem apareceu a semana
+       inteira nas máquinas do comercial e ninguém viu nenhuma: toast dura
+       segundos, e quem está trabalhando não está olhando para o rodapé. */
+    toast('Memória deste aparelho cheia — veja o aviso na lista');
+    try{ _avisoMemoria('nao-gravou'); }catch(e){}
     return false;
   }
 }
@@ -3519,9 +3612,18 @@ function liberarEspaco(){
         'fotos já subiram, e eu não apago foto sem essa confirmação. '+
         'Feche e abra o app com internet e tente de novo. Hoje em uso: '+antes+' KB.</span>';
   }else{
-    msg='<span class="status off">Não havia foto para apagar (em uso: '+antes+' KB). '+
-        'Ou as fotos destes dias ainda não terminaram de subir para a nuvem — e aí eu não apago '+
-        'mesmo —, ou o espaço está sendo ocupado por outra coisa. Me mande a lista abaixo.</span>';
+    /* ⚠️ ESTE É O CASO PERIGOSO — 07/10/2026.
+       "Não achei o que apagar" com a memória cheia não é falta de espaço: a
+       limpeza só mexe em foto CONFIRMADA na nuvem, então quer dizer que há foto
+       que nunca subiu — foto num lugar só. Apareceu nos dois computadores desta
+       semana e foi lida como recado banal. Agora vira alarme na lista. */
+    var _semSubir=_fotosSemSubir();
+    msg='<span class="status off">Não havia foto para apagar (em uso: '+antes+' KB).'+
+        (_semSubir?(' <b>'+_semSubir+' ficha(s) têm foto que ainda não subiu para o sistema</b> — '+
+                    'e foto não confirmada eu não apago. Veja o aviso na lista.')
+                 :(' O espaço está sendo ocupado por outra coisa. Me mande a lista abaixo.'))+
+        '</span>';
+    if(antes>LIMITE_AVISO_KB){ try{ _avisoMemoria(_semSubir?'sem-liberar':'nao-gravou'); }catch(e){} }
   }
   /* A lista por tamanho vai junto, sempre. É ela que diz se o problema são as
      fotos, a fila de envio ou a lista em si — e evita mais um dia de palpite. */
@@ -3532,6 +3634,7 @@ function liberarEspaco(){
     'background:#111;color:#eee;border-radius:8px;padding:8px 10px;line-height:1.6">'+
     'O QUE ESTÁ OCUPANDO (total '+depois+' KB)<br>'+det+'</div>';
   toast(libertou>0?('Liberei '+libertou+' KB'):'Nada a liberar');
+  if(libertou>0){ try{ _avisoMemoria(); }catch(e){} }   // liberou: reavalia a faixa
 }
 function salvarLocal(d){
   let arr; try{arr=JSON.parse(localStorage.getItem('petro_receb')||'[]');}catch(e){arr=[];}
@@ -5220,6 +5323,9 @@ try{var _cv=document.getElementById('codVer'); if(_cv)_cv.textContent='R 02-1 ·
    tempo de tentar subir a fila. Cedo demais, _fotosSincronizadas ainda não
    existe e a limpeza não apagaria nada — seguro, mas nunca limparia. */
 setTimeout(function(){ try{ _limparFotosAntigas(); }catch(e){} },20000);   // 2 dias — ver DIAS_FOTO_LOCAL
+/* Ao abrir o app, olha a memória uma vez: se já estiver apertada, a pessoa
+   fica sabendo antes de a lista parar de atualizar. 07/10/2026. */
+setTimeout(function(){ try{ _avisoMemoria(); }catch(e){} },25000);
 _pendAtualiza();
 if(SHEET_URL)setTimeout(function(){filaEnviar(false);},2500); // sobe o que ficou pendente de sessões anteriores
 /* Cada passo isolado. O formulário (addPeca) NÃO pode depender de a lista
