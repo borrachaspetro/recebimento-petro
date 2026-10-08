@@ -659,7 +659,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v72';
+const APP_VERSAO='v73';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1342,12 +1342,25 @@ function addPeca(){
          nenhum campo previu. -->
     <div data-blk="tecnica" class="hide">
       <div class="grp" style="color:#333">Tipo de peça técnica <span style="color:var(--vermelho)">*</span></div>
-      <div class="seg tecseg" data-pid="${id}">
+      <!-- A quebra de linha e o rótulo curto entraram com o NA, em 08/10/2026:
+           quatro botões numa faixa que não quebra dariam ~79 px cada, e
+           "Prensada (sem matriz)" não cabe nisso. É a mesma pedra da v56, em
+           que a quantidade do acessório virou uma tira de 27 px. O que a
+           prensada é continua explicado na linha de ajuda logo abaixo. -->
+      <div class="seg tecseg" data-pid="${id}" style="flex-wrap:wrap">
         <button data-v="Matriz">Matriz</button>
         <button data-v="Molde">Molde</button>
-        <button data-v="Prensada">Prensada (sem matriz)</button>
+        <button data-v="Prensada">Prensada</button>
+        <!-- NA — 08/10/2026, pedido da Suzana. Nem toda peça técnica cabe em
+             matriz, molde ou prensada: o TANQUE é o exemplo dela, não se
+             encaixa em nenhum dos três agrupamentos. Sem esta saída a pessoa
+             era obrigada a escolher um rótulo errado só para a ficha andar —
+             e rótulo errado na ficha vira informação errada no orçamento.
+             Com NA, vale o que estiver escrito nas Informações. -->
+        <button data-v="NA">NA</button>
       </div>
-      <div class="hint" style="margin-top:2px">Prensada é a peça sem matriz — segue só pelas Informações acima.</div>
+      <div class="hint" style="margin-top:2px">Prensada é a peça sem matriz — segue só pelas Informações acima.
+        <b>NA</b> é para a peça que não é nenhum dos três (um tanque, por exemplo): descreva nas Informações.</div>
 
       <!-- Só matriz e molde: a prensada não tem ferramental para descrever. -->
       <div class="tecFerr hide" id="tecFerr-${id}">
@@ -2373,8 +2386,11 @@ function salvarFicha(enviarDepois){
          quadrada não deve nada na terceira caixa, que nem aparece. */
       if(_modoSrv==='tecnica'){
         var tec=st.tec||{};
-        if(!tec.tipo){ erros.push(n+'Tipo de peça técnica (matriz, molde ou prensada)'); return; }
-        if(tec.tipo==='Prensada') return;
+        if(!tec.tipo){ erros.push(n+'Tipo de peça técnica (matriz, molde, prensada ou NA)'); return; }
+        /* Prensada e NA param aqui: nenhuma das duas tem ferramental para
+           descrever, e seguem pelo texto livre de Informações. O NA entrou em
+           08/10/2026 para a peça que não é nenhum dos três (o tanque). */
+        if(tec.tipo==='Prensada'||tec.tipo==='NA') return;
 
         if(!tec.formato)erros.push(n+'Formato da matriz');
         else{
