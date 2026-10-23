@@ -215,6 +215,31 @@
   <div class="card">
     <h2><span class="n">1</span> Recebimento</h2>
     <div class="body">
+      <!-- ═══ TIPO DE FICHA — 23/10/2026 ════════════════════════════════════
+           Pedido da Suzana: o cliente pede preço de uma peça que NÃO vem para a
+           Petro — manda medida, desenho ou foto por WhatsApp — e isso precisa
+           chegar ao Fábio para orçar. Até aqui não cabia no app: a ficha exigia
+           transporte, nota fiscal, embalagem, foto da peça e, em
+           desenvolvimento, assinatura do cliente. Tudo isso é de peça que está
+           no pátio; numa solicitação não existe nenhum deles.
+
+           "Só orçamento" NÃO é meio recebimento: é outra coisa. A ficha nunca
+           vira recebimento depois (decisão da Suzana, 23/10: "não tem peça
+           física, é só solicitação de acordo com as informações recebidas pelo
+           cliente"). Se um dia a peça chegar, abre-se um recebimento normal,
+           sem amarração com esta ficha. -->
+      <label>Esta ficha é de… <span class="req">*</span></label>
+      <div class="chips" id="tipoFicha">
+        <div class="chip on" data-v="Peça recebida">Peça recebida</div>
+        <div class="chip" data-v="Só orçamento">Só orçamento — a peça não veio</div>
+      </div>
+      <div id="tipoFichaAviso" class="hide"
+           style="margin:8px 0 2px;padding:8px 10px;border-radius:8px;background:#FFF8DC;border-left:4px solid #FFCC00;font-size:12px;line-height:1.45">
+        <b>Solicitação de orçamento.</b> A peça não está na Petro, então
+        transporte, nota fiscal, embalagem e assinatura saem da ficha e não são
+        cobrados. Preencha o cliente e descreva a peça com o que ele passou
+        (medidas, desenho, foto). Mande para o <b>Orçamento</b> — vai para o Fábio.
+      </div>
       <div class="row">
         <div>
           <label>Responsável <span class="req">*</span></label>
@@ -250,7 +275,7 @@
   </div>
 
   <!-- 3. TRANSPORTE -->
-  <div class="card">
+  <div class="card" id="cardTransporte">
     <h2><span class="n">3</span> Quem trouxe (transporte)</h2>
     <div class="body">
       <div class="chips" id="transp">
@@ -265,7 +290,7 @@
   </div>
 
   <!-- 4. NOTA FISCAL -->
-  <div class="card">
+  <div class="card" id="cardNota">
     <h2><span class="n">4</span> Nota fiscal</h2>
     <div class="body">
       <label>Nº da NF</label>
@@ -288,7 +313,7 @@
   </div>
 
   <!-- 5. EMBALAGEM -->
-  <div class="card">
+  <div class="card" id="cardEmbalagem">
     <h2><span class="n">5</span> Embalagem</h2>
     <div class="body">
       <div class="grp">Tipo de embalagem</div>
@@ -648,7 +673,11 @@
 
 <script>
 let fotos=[], editId=null, pecaSeq=0;
-const sel={transp:'',nfdiv:'',embCond:'',embConserto:'',embNovaCaixa:'',servico:'',confcli:''};
+const sel={transp:'',nfdiv:'',embCond:'',embConserto:'',embNovaCaixa:'',servico:'',confcli:'',tipoFicha:'Peça recebida'};
+/* SÓ ORÇAMENTO — 23/10/2026. Uma pergunta só, feita no item 1, manda em tudo o
+   que vem depois: o que aparece na tela, o que é cobrado, para onde a ficha vai
+   por padrão e como ela é mostrada na lista e no PDF. */
+function _soOrcamento(){ return sel.tipoFicha==='Só orçamento'; }
 const embTipoSel=new Set();
 const pecasState={}; // id -> {cb:'', visual:{}}
 // Link da planilha já embutido: aparelho novo abre conectado sem ninguém colar nada.
@@ -659,7 +688,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v74';
+const APP_VERSAO='v75';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -683,6 +712,51 @@ function bindChipsSingle(id, key, descId, descTrigger, after){
 }
 bindChipsSingle('transp','transp','transpDesc',['Transportadora','Outros']);
 bindChipsSingle('servico','servico','servicoDesc',['Outros'],function(){ aplicarModoServico(); });
+bindChipsSingle('tipoFicha','tipoFicha',null,null,function(){ aplicarTipoFicha(); });
+
+/* ═══ SÓ ORÇAMENTO: O QUE SAI DA TELA — 23/10/2026 ═══════════════════════════
+   Os três cards somem porque não existe resposta certa para eles quando a peça
+   não veio: ninguém trouxe, não há nota e não há embalagem. Deixar na tela
+   obrigaria a inventar "NA" três vezes — e campo que se preenche com NA toda
+   vez é campo que ninguém lê depois.
+
+   ⚠️ ESCONDER NÃO BASTA: as respostas antigas continuariam gravadas. Quem
+   começou a ficha como recebimento, marcou a embalagem e depois trocou para
+   "só orçamento" levaria "Embalagem: Caixa de madeira" numa ficha sem peça.
+   Por isso o que sai da tela é APAGADO do estado aqui. */
+function aplicarTipoFicha(){
+  var so=_soOrcamento();
+  ['cardTransporte','cardNota','cardEmbalagem'].forEach(function(id){
+    var el=document.getElementById(id); if(el)el.classList.toggle('hide',so);
+  });
+  var av=document.getElementById('tipoFichaAviso'); if(av)av.classList.toggle('hide',!so);
+  if(so){
+    ['transp','nfdiv','embCond','embConserto','embNovaCaixa'].forEach(function(k){ sel[k]=''; });
+    embTipoSel.clear();
+    ['transpDesc','nf','embTipoDesc','nfQtdeNota','nfQtdeReceb','embConsertoObs',
+     'cxComp','cxLarg','cxAlt','assNome','assDoc'].forEach(function(id){
+      var el=document.getElementById(id); if(el)el.value='';
+    });
+    madeiras=[]; if(typeof renderMadeiras==='function')renderMadeiras();
+    if(typeof assLimpar==='function'){ try{ assLimpar(); }catch(e){} }
+    ['cardTransporte','cardNota','cardEmbalagem'].forEach(function(id){
+      var c=document.getElementById(id);
+      if(c)c.querySelectorAll('.chip.on,.seg button.on').forEach(function(x){x.classList.remove('on','ok','bad');});
+    });
+  }
+  /* A assinatura depende das duas perguntas (tipo de ficha e tipo de serviço),
+     então quem decide é sempre o aplicarModoServico. */
+  if(typeof aplicarModoServico==='function')aplicarModoServico();
+}
+/* O chip padrão perde o "on" no limparForm, que limpa todos de uma vez. Isto
+   devolve o estado inicial — sem ele a ficha nova nasceria sem tipo nenhum. */
+function _tipoFichaPadrao(){
+  sel.tipoFicha='Peça recebida';
+  document.querySelectorAll('#tipoFicha .chip').forEach(function(c){
+    c.classList.toggle('on', c.dataset.v==='Peça recebida');
+  });
+  aplicarTipoFicha();
+}
 
 /* ═══ O TIPO DE SERVIÇO (item 6) MANDA NO FORMULÁRIO DAS PEÇAS (item 7) ═══
    Pedido da Suzana em 25/08/2026, com o motivo de cada um:
@@ -1065,8 +1139,11 @@ function aplicarModoServico(){
        Reaplico aqui porque o bloco pode ter acabado de reaparecer. */
     if(st&&st.cb)pe.querySelectorAll('.revmed').forEach(function(x){ x.classList.toggle('hide',st.cb==='S/B'); });
   });
+  /* A assinatura do cliente é o aceite de quem ENTREGOU a peça no balcão. Em
+     solicitação de orçamento ninguém entregou nada, então ela não aparece nem
+     em Desenvolvimento. */
   var card=document.getElementById('cardAssinatura');
-  if(card)card.classList.toggle('hide', modo!=='desenvolvimento');
+  if(card)card.classList.toggle('hide', modo!=='desenvolvimento'||_soOrcamento());
   /* Sem informação → não faz sentido perguntar se o serviço foi confirmado
      com o cliente: não há serviço nenhum para confirmar. A pergunta some e a
      resposta fica "Ainda não", que é a verdade. Quando o comercial escolher o
@@ -2334,32 +2411,44 @@ function salvarFicha(enviarDepois){
   let erros=[];
   // ---- campos de texto obrigatórios (aceitam NA) ----
   function reqT(id,nome){const el=document.getElementById(id);if(!el)return;el.classList.remove('field-err');if(!el.value.trim()){erros.push(nome);el.classList.add('field-err');}}
+  var _so=_soOrcamento();
   reqT('resp','Responsável'); reqT('data','Data'); reqT('cliente','Cliente');
-  reqT('contato','Contato'); reqT('fone','Fone'); reqT('nf','Nº da NF');
+  reqT('contato','Contato'); reqT('fone','Fone');
+  /* SÓ ORÇAMENTO não tem nota fiscal para ter número — a peça não veio. O resto
+     dos dados do cliente continua obrigatório: é com eles que o Fábio orça e é
+     por eles que o comercial acha a solicitação depois. */
+  if(!_so)reqT('nf','Nº da NF');
   reqT('obs','Observações gerais');
   // ---- seleções obrigatórias (+ campos "descrever" quando abertos) ----
-  if(!sel.transp)erros.push('Quem trouxe (transporte)');
-  else if((sel.transp==='Transportadora'||sel.transp==='Outros')&&!val('transpDesc'))erros.push('Descrever o transporte');
-  var _semNota=document.getElementById('nfSemNota')&&document.getElementById('nfSemNota').checked;
-  if(!_semNota){
-    if(!sel.nfdiv)erros.push('Divergências na NF?');
-    else if(sel.nfdiv==='Sim'&&(!val('nfQtdeNota')||!val('nfQtdeReceb')))erros.push('Qtde na nota e Qtde recebida');
+  /* ═══ O QUE NÃO SE COBRA EM SÓ ORÇAMENTO — 23/10/2026 ═════════════════════
+     Transporte, nota e embalagem saíram da TELA (ver aplicarTipoFicha). A
+     mesma regra de sempre vale aqui: cobra-se só o que está visível. Cobrar
+     campo escondido é o jeito mais rápido de travar alguém sem ele entender
+     por quê — foi o que aconteceu com a peça técnica em 11/09. */
+  if(!_so){
+    if(!sel.transp)erros.push('Quem trouxe (transporte)');
+    else if((sel.transp==='Transportadora'||sel.transp==='Outros')&&!val('transpDesc'))erros.push('Descrever o transporte');
+    var _semNota=document.getElementById('nfSemNota')&&document.getElementById('nfSemNota').checked;
+    if(!_semNota){
+      if(!sel.nfdiv)erros.push('Divergências na NF?');
+      else if(sel.nfdiv==='Sim'&&(!val('nfQtdeNota')||!val('nfQtdeReceb')))erros.push('Qtde na nota e Qtde recebida');
+    }
+    if(embTipoSel.size===0)erros.push('Tipo de embalagem');
+    else if(embTipoSel.has('Outros')&&!val('embTipoDesc'))erros.push('Descrever embalagem (Outros)');
+    if(!sel.embCond)erros.push('Condições da embalagem');
+    else if(sel.embCond==='Danificada'){
+      if(!sel.embConserto)erros.push('Orçar conserto da embalagem?');
+      // "vai consertar: sim" sem dizer o quê não serve para quem orça
+      else if(sel.embConserto==='Sim'&&!val('embConsertoObs'))erros.push('O que precisa ser consertado na embalagem');
+      if(!sel.embNovaCaixa)erros.push('Orçar nova caixa?');
+    }
+    else if(sel.embCond==='Não possui'){ if(!sel.embNovaCaixa)erros.push('Orçar nova caixa?'); }
   }
-  if(embTipoSel.size===0)erros.push('Tipo de embalagem');
-  else if(embTipoSel.has('Outros')&&!val('embTipoDesc'))erros.push('Descrever embalagem (Outros)');
-  if(!sel.embCond)erros.push('Condições da embalagem');
-  else if(sel.embCond==='Danificada'){
-    if(!sel.embConserto)erros.push('Orçar conserto da embalagem?');
-    // "vai consertar: sim" sem dizer o quê não serve para quem orça
-    else if(sel.embConserto==='Sim'&&!val('embConsertoObs'))erros.push('O que precisa ser consertado na embalagem');
-    if(!sel.embNovaCaixa)erros.push('Orçar nova caixa?');
-  }
-  else if(sel.embCond==='Não possui'){ if(!sel.embNovaCaixa)erros.push('Orçar nova caixa?'); }
   if(!sel.servico)erros.push('Tipo de serviço');
   else if(sel.servico==='Outros'&&!val('servicoDesc'))erros.push('Descrever o serviço (Outros)');
   if(!sel.confcli)erros.push('Confirmou o serviço com o cliente?');
   // ---- assinatura do cliente: obrigatória em Desenvolvimento ----
-  if(_modoServico()==='desenvolvimento'){
+  if(_modoServico()==='desenvolvimento'&&!_so){
     if(!val('assNome'))erros.push('Nome de quem está assinando');
     if(!assImagem())erros.push('Assinatura do cliente (item 10)');
   }
@@ -2377,7 +2466,11 @@ function salvarFicha(enviarDepois){
        escondido é o jeito mais rápido de travar alguém sem ele entender por quê. */
     if(_modoSrv==='tecnica'||_modoSrv==='desenvolvimento'){
       if(faltou('p_info'))erros.push(n+'Informações (descreva o que o cliente passou)');
-      if(!editId && !(st.fotosPeca&&st.fotosPeca.length))erros.push(n+'Foto (obrigatória)');
+      /* SÓ ORÇAMENTO: a peça não está aqui para ser fotografada. O que o cliente
+         mandou (desenho, foto por WhatsApp) entra pelas Fotos do item 8, que são
+         opcionais — e o texto de Informações continua sendo cobrado, porque é
+         com ele que o Fábio orça. */
+      if(!editId && !_so && !(st.fotosPeca&&st.fotosPeca.length))erros.push(n+'Foto (obrigatória)');
 
       /* A FICHA DA PEÇA TÉCNICA — 11/09/2026.
          Mesma regra do resto do app: cobra-se só o que está à vista. A peça
@@ -2453,7 +2546,9 @@ function salvarFicha(enviarDepois){
     else if(st.tipo==='Outros'&&faltou('p_tipooutros'))erros.push(n+'Tipo de peça: descrever qual');
     // garantia sem motivo não serve de registro: meses depois ninguém sabe por quê
     if(st.garantia==='Sim'&&faltou('p_garmotivo'))erros.push(n+'Motivo da garantia');
-    if(st.tipo==='Eixo'){
+    /* Ponteira, furo de centro e estado geral são INSPEÇÃO da peça que chegou:
+       alguém olhou, mediu e classificou. Em só orçamento não há o que olhar. */
+    if(st.tipo==='Eixo'&&!_so){
       if(!st.ptSN)erros.push(n+'Ponteira (Conforme/Não conforme)');
       else{
         if(!editId && !(st.pt&&st.pt.some(x=>x.foto)))erros.push(n+'Foto da ponteira (obrigatória)');
@@ -2468,8 +2563,8 @@ function salvarFicha(enviarDepois){
         if(!st.fcCons)erros.push(n+'Precisa conserto do furo de centro? (Sim/Não)');
       }
     }
-    if(!st.estado)erros.push(n+'Estado geral');
-    if(!editId && !(st.fotosPeca&&st.fotosPeca.length))erros.push(n+'Foto da peça (obrigatória)'); // obrigatório só em recebimentos novos
+    if(!st.estado&&!_so)erros.push(n+'Estado geral');
+    if(!editId && !_so && !(st.fotosPeca&&st.fotosPeca.length))erros.push(n+'Foto da peça (obrigatória)'); // obrigatório só em recebimentos novos (e nunca em só orçamento)
   });
   erros=[...new Set(erros)];
 
@@ -2489,7 +2584,7 @@ function salvarFicha(enviarDepois){
   limparForm(false);
   verTab('lista');
   if(enviarDepois){ openEnviar(d.id); }
-  else { toast('Recebimento salvo'); }
+  else { toast(d.soOrcamento==='Sim'?'Solicitação de orçamento salva':'Recebimento salvo'); }
 }
 // ============ ENVIO POR E-MAIL (destino + anexo) ============
 const AREAS={comercial:{nome:'Comercial'},orcamento:{nome:'Orçamento'},admissao:{nome:'Admissão / Produção'},cliente:{nome:'Cliente'}};
@@ -2524,7 +2619,8 @@ function openEnviar(id){
   _enviarId=id;
   _enviarPrimeiro=!d.jaEnviado;
   _enviarEtapaAtual=d.etapa||'comercial';   // onde a ficha está AGORA — ver _atualizaEnvEmailInfo
-  document.getElementById('enviarInfo').textContent=(d.cliente||'—')+(d.nf?(' · NF '+d.nf):'')+' · '+((d.pecas&&d.pecas.length)||0)+' peça(s)';
+  document.getElementById('enviarInfo').textContent=(d.cliente||'—')+(d.nf?(' · NF '+d.nf):'')
+    +(d.soOrcamento==='Sim'?' · SÓ ORÇAMENTO (sem peça)':'')+' · '+((d.pecas&&d.pecas.length)||0)+' peça(s)';
   document.getElementById('envEmailCliente').value=_getCliEmail(d.cliente);
   var chk=document.getElementById('envAnexo'), fixo=document.getElementById('envAnexoFixo');
   if(_enviarPrimeiro){ chk.checked=true; chk.disabled=true; fixo.style.display='block'; }
@@ -2543,6 +2639,12 @@ function openEnviar(id){
      O envio NÃO depende mais de campo preenchido, em lugar nenhum: preencher é
      decisão de quem orça, não condição para a ficha andar. */
   var destino='comercial';   // o comercial é o dono do pedido: toda ficha volta para ele
+  /* SÓ ORÇAMENTO — 23/10/2026. Esta ficha existe para uma coisa só: o Fábio dar
+     o preço. Quem lança é o comercial (decisão da Suzana), então abrir com
+     "Comercial" marcado seria mandar a ficha para quem acabou de escrevê-la.
+     Depois que o orçamento está pronto, a ficha volta ao comercial e aí o
+     padrão é o de sempre — por isso a condição olha onde ela ESTÁ agora. */
+  if(d.soOrcamento==='Sim'&&_enviarEtapaAtual!=='orcamento')destino='orcamento';
   _selEnvDestino(destino);
   document.getElementById('enviarModal').classList.add('show');
 }
@@ -2701,7 +2803,12 @@ function _avariasDa(d){
 function _ehAdmissaoParaComercial(dest,etapaAnt){
   return dest==='comercial' && String(etapaAnt||'')!=='orcamento';
 }
-function _prefixoAssunto(dest,etapaAtual){
+function _prefixoAssunto(dest,etapaAtual,d){
+  /* SÓ ORÇAMENTO — 23/10/2026. "CUSTO PENDENTE" diz ao Fábio que uma peça está
+     parada esperando preço. Aqui não há peça parada: é um pedido de preço sobre
+     informação que o cliente passou. O assunto tem de dizer isso, senão ele vai
+     procurar a peça no pátio. */
+  if(d&&d.soOrcamento==='Sim'&&dest==='orcamento')return 'SOLICITAÇÃO DE ORÇAMENTO (sem peça) — ';
   if(dest==='orcamento')return 'CUSTO PENDENTE — ';
   if(dest==='comercial')return (etapaAtual==='orcamento')?'CUSTO FINALIZADO — ':'ADMISSÃO COM AVARIA — ';
   if(dest==='admissao')return 'DEVOLVIDO PARA A ADMISSÃO — ';
@@ -2756,8 +2863,11 @@ function confirmarEnviar(){
      e nuvem já foram gravadas acima. O que depende da avaria é só o E-MAIL. */
   var _avarias=_ehAdmissaoParaComercial(dest,_etapaAnt)?_avariasDa(d):[];
   var _mandaEmail=!_ehAdmissaoParaComercial(dest,_etapaAnt)||_avarias.length>0;
-  var assunto=_prefixoAssunto(dest,_etapaAnt)+_tituloFicha(d);
-  var intro=(dest==='orcamento'?'Segue a ficha para orçamento (preencher Molde/Fórmula/Peso/Preço no app):':(dest==='admissao'?'Recebimento devolvido à admissão para corrigir/completar:':(dest==='cliente'?'Segue a confirmação do recebimento do seu material na Borrachas Petro:':'Recebimento para o comercial conferir/completar no app:')));
+  var assunto=_prefixoAssunto(dest,_etapaAnt,d)+_tituloFicha(d);
+  var intro=(dest==='orcamento'?((d.soOrcamento==='Sim')
+      ? 'SOLICITAÇÃO DE ORÇAMENTO — a peça NÃO foi recebida na Petro. O que segue é o que o cliente informou (medidas, desenho, fotos). Preencher Molde/Fórmula/Peso/Preço no app:'
+      : 'Segue a ficha para orçamento (preencher Molde/Fórmula/Peso/Preço no app):')
+    :(dest==='admissao'?'Recebimento devolvido à admissão para corrigir/completar:':(dest==='cliente'?'Segue a confirmação do recebimento do seu material na Borrachas Petro:':'Recebimento para o comercial conferir/completar no app:')));
   fecharEnviar();
   function mandar(dd){
     /* Sem avaria, a ficha segue para o comercial pelo app e NÃO sai e-mail.
@@ -2876,7 +2986,12 @@ function coletar(pecas){
     assinanteNome:val('assNome'), assinanteDoc:val('assDoc'),
     assinadoEm:((typeof assImagem==='function'&&assImagem())
       ? (prev.assinadoEm||new Date().toLocaleString('pt-BR')) : ''),
-    pecas:pecas,fotos:[...fotos],obs:val('obs'),criado:new Date().toLocaleString('pt-BR')
+    pecas:pecas,fotos:[...fotos],obs:val('obs'),
+    /* SÓ ORÇAMENTO — 23/10/2026. Gravado como 'Sim' ou vazio, nunca como
+       true/false: o valor vai para uma célula da planilha e volta de lá como
+       texto. Ver a coluna "Só orçamento (sem peça)" no Code.gs. */
+    soOrcamento:_soOrcamento()?'Sim':'',
+    criado:new Date().toLocaleString('pt-BR')
   };
 }
 
@@ -3044,6 +3159,11 @@ function _ensureJsPDF(cb){
   document.head.appendChild(s);
 }
 function _tituloFicha(d){
+  /* SÓ ORÇAMENTO não tem nota fiscal: a peça nunca entrou na Petro. Escrever
+     "NF sem-NF" no assunto do e-mail e no nome do PDF faria o Fábio procurar
+     uma nota que não existe. */
+  if(d&&d.soOrcamento==='Sim')
+    return (d.cliente||'Cliente')+' - '+(fmtData(d.data)||'')+' - SÓ ORÇAMENTO';
   var nf=(d.nf&&(''+d.nf).trim())||'sem-NF';
   return (d.cliente||'Cliente')+' - '+(fmtData(d.data)||'')+' - NF '+nf;
 }
@@ -3070,9 +3190,13 @@ function gerarPDFdoc(d,semFotos){
     doc.setFillColor(90,90,90);doc.rect(0,0,pageW,20,'F');
     try{doc.addImage(LOGO,'PNG',M,4.2,30,11.8);}catch(e){}
     doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(13);
-    doc.text('RECEBIMENTO DE SERVIÇOS',M+35,9);
+    /* SÓ ORÇAMENTO — 23/10/2026. O título do PDF é a primeira coisa que o Fábio
+       lê. Mantê-lo como "RECEBIMENTO DE SERVIÇOS" numa solicitação faria ele
+       procurar no pátio uma peça que nunca chegou. */
+    var _so=(d.soOrcamento==='Sim');
+    doc.text(_so?'SOLICITAÇÃO DE ORÇAMENTO':'RECEBIMENTO DE SERVIÇOS',M+35,9);
     doc.setTextColor(235,235,235);doc.setFont('helvetica','normal');doc.setFontSize(8);
-    doc.text('Revestimento de rolos',M+35,15);
+    doc.text(_so?'A peça NÃO foi recebida — dados informados pelo cliente':'Revestimento de rolos',M+35,15);
     doc.setFont('helvetica','bold');doc.setFontSize(10);
     doc.text('R 02-1',pageW-M,9,{align:'right'});
     y=24;
@@ -3087,9 +3211,16 @@ function gerarPDFdoc(d,semFotos){
     if(d.embCond==='Danificada'||d.embCond==='Não possui')recRows.push(['Orçar nova caixa',d.embNovaCaixa||'—']);
     if(d.caixaMed)recRows.push(['Caixa a fabricar (mm)',d.caixaMed]);
     if(d.madeira)recRows.push(['Madeira a comprar',d.madeira]);
+    /* SÓ ORÇAMENTO: o bloco do recebimento não tem o que mostrar — não houve
+       transporte, nota nem embalagem. Em vez de cinco linhas com travessão,
+       que fazem parecer que alguém esqueceu de preencher, o bloco diz o que de
+       fato aconteceu. */
+    if(d.soOrcamento==='Sim')
+      recRows=[['Peça recebida','NÃO — só solicitação'],['Nota fiscal','não há'],
+               ['Base do orçamento','informações do cliente']];
     var blocos=[
       ['DADOS DO CLIENTE',[['Cliente',d.cliente],['Data',fmtData(d.data)],['Responsável',d.resp],['Contato',d.contato],['Fone',d.fone]]],
-      ['RECEBIMENTO',recRows],
+      [d.soOrcamento==='Sim'?'SOLICITAÇÃO':'RECEBIMENTO',recRows],
       ['SERVIÇO',[['Serviço',d.servico],['Confirmado c/ cliente',
         d.servico==='Sem informação'?'A DEFINIR':(d.confcli==='Sim'?'Sim':'AINDA NÃO')]]]
     ];
@@ -3441,7 +3572,9 @@ function pecaLinhas(p){
 }
 function fmtData(s){if(!s)return '';const m=(''+s).match(/^(\d{4})-(\d{2})-(\d{2})/);return m?(m[3]+'/'+m[2]+'/'+m[1]):s;}
 function montarTexto(d){
-  let t='*RECEBIMENTO DE SERVIÇO — Borrachas Petro (R 02-1)*\n';
+  var _so=(d.soOrcamento==='Sim');
+  let t=_so?'*SOLICITAÇÃO DE ORÇAMENTO — Borrachas Petro (R 02-1)*\n⚠️ A peça NÃO foi recebida. Orçamento pelas informações do cliente.\n'
+          :'*RECEBIMENTO DE SERVIÇO — Borrachas Petro (R 02-1)*\n';
   t+='Cliente: '+d.cliente+'\n';
   if(d.nf)t+='NF: '+d.nf+'\n';
   /* "Sem informação" já diz tudo: repetir "NÃO confirmado" só faria o aviso
@@ -3459,7 +3592,7 @@ function montarTexto(d){
     if(d.caixaMed)t+='Caixa a fabricar (mm): '+d.caixaMed+'\n';
     if(d.madeira)t+='Madeira a comprar: '+d.madeira+'\n';
   }
-  t+='Recebido por: '+d.resp+' · '+fmtData(d.data);
+  t+=(_so?'Solicitado por: ':'Recebido por: ')+d.resp+' · '+fmtData(d.data);
   return t;
 }
 function wrapCount(ctx,text,maxW){ctx.font='13px Arial';const w=(text||'').split(' ');let l='',n=1;
@@ -4519,12 +4652,17 @@ function filtrarLista(){
     const etapaLbl={admissao:'Admissão',comercial:'Comercial',orcamento:'Orçamento'}[etapa]||'Comercial';
     const cor={admissao:['#FDE2E1','#C0392B'],comercial:['#FCF3CF','#8a6d00'],orcamento:['#D6EAF8','#1F618D']}[etapa]||['#FCF3CF','#8a6d00'];
     const badge=concl?'<span class="badge" style="background:#D1F2EB;color:#0E6655">✓ Concluído</span>':('<span class="badge" style="background:'+cor[0]+';color:'+cor[1]+'">● Pendente '+etapaLbl+'</span>');
+    /* SÓ ORÇAMENTO — 23/10/2026. Vai na mesma lista, mas marcada (decisão da
+       Suzana). Sem o selo, quem bate o olho conta como peça no pátio e sai
+       procurando no galpão uma peça que nunca chegou. Amarelo da Petro. */
+    const selo=(d.soOrcamento==='Sim')
+      ? '<span class="badge" style="background:#FFCC00;color:#000;font-weight:800">SÓ ORÇAMENTO</span>' : '';
     const _plist=Array.isArray(d.pecas)?d.pecas:[];
     const _np=_plist.length;
     const _tq=_plist.reduce((s,p)=>s+(parseInt(p&&p.qtde,10)||0),0);
     const _pcs=_np+' item(ns)'+(_tq?(' · '+_tq+' pç'):'');
     return `<div class="saved-item">
-      <div style="flex:1;min-width:0"><b>${d.cliente||'—'}</b> ${d.nf?('· NF '+d.nf):''} ${badge}<br>
+      <div style="flex:1;min-width:0"><b>${d.cliente||'—'}</b> ${d.nf?('· NF '+d.nf):''} ${selo} ${badge}<br>
       <span class="mini">${d.servico||''} · ${_pcs} · ${fmtData(d.data)}${d.resp?(' · '+d.resp):''}</span></div>
       <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
         <button class="ic" title="Editar" onclick="carregarParaEditar('${d.id}')">✏️</button>
@@ -4540,10 +4678,19 @@ function filtrarLista(){
 function renderDash(arr){
   const box=document.getElementById('dashBox');if(!box)return;
   if(!arr.length){box.innerHTML='<div class="hint" style="margin:0">Sem dados ainda. Os recebimentos aparecem aqui.</div>';return;}
-  const pedidos=arr.length;
-  const totPe=arr.reduce((s,d)=>s+(d.pecas?d.pecas.length:0),0);
-  const atend=arr.filter(d=>(d.status||'Pendente')==='Atendido').length;
+  /* ═══ SÓ ORÇAMENTO FICA FORA DA CONTA DAS PEÇAS — 23/10/2026 ══════════════
+     Decisão da Suzana: "aparece, mas marcada e separada". O número de "Peças"
+     é usado para saber quanto material está na Petro — somar a solicitação ali
+     faria o resumo mentir, porque essas peças nunca entraram. As solicitações
+     viram um quadrinho próprio, e Pedidos/Pendentes/Atendidos passam a contar
+     só recebimento de verdade. */
+  const soOrc=arr.filter(d=>d.soOrcamento==='Sim');
+  const receb=arr.filter(d=>d.soOrcamento!=='Sim');
+  const pedidos=receb.length;
+  const totPe=receb.reduce((s,d)=>s+(d.pecas?d.pecas.length:0),0);
+  const atend=receb.filter(d=>(d.status||'Pendente')==='Atendido').length;
   const pend=pedidos-atend;
+  const soOrcPend=soOrc.filter(d=>(d.status||'Pendente')!=='Atendido').length;
   const tipos={};arr.forEach(d=>{const t=(d.servico||'—').split(' — ')[0];tipos[t]=(tipos[t]||0)+1;});
   const maxT=Math.max.apply(null,Object.values(tipos));
   const kpis=`<div class="kpis">
@@ -4551,7 +4698,10 @@ function renderDash(arr){
     <div class="kpi"><div class="kn" style="color:#E67E22">${pend}</div><div class="kl">Pendentes</div></div>
     <div class="kpi"><div class="kn" style="color:#1e9e54">${atend}</div><div class="kl">Atendidos</div></div>
     <div class="kpi"><div class="kn">${totPe}</div><div class="kl">Peças</div></div>
-  </div>`;
+  </div>`+(soOrc.length?`<div class="kpis" style="margin-top:6px">
+    <div class="kpi" style="border-left:4px solid #FFCC00"><div class="kn">${soOrc.length}</div><div class="kl">Só orçamento (sem peça)</div></div>
+    <div class="kpi" style="border-left:4px solid #FFCC00"><div class="kn" style="color:#E67E22">${soOrcPend}</div><div class="kl">Aguardando preço</div></div>
+  </div>`:'');
   const bars=Object.entries(tipos).sort((a,b)=>b[1]-a[1]).map(([t,n])=>`
     <div class="bar"><span class="bl">${t}</span><span class="btrack"><span class="bfill" style="width:${Math.round(n/maxT*100)}%"></span></span><span class="bn">${n}</span></div>`).join('');
   box.innerHTML=kpis+'<div class="grp" style="margin-top:8px">Por tipo de serviço</div>'+bars;
@@ -4717,6 +4867,17 @@ function carregarParaEditar(id){
   const d=LISTA_ATUAL.find(x=>String(x.id)===String(id));
   if(!d){toast('Registro não encontrado');return;}
   verTab('novo'); limparForm(false); editId=d.id;
+  /* SÓ ORÇAMENTO — 23/10/2026. Tem de vir ANTES de preencher o resto: é esta
+     resposta que decide quais cards existem na tela. Reabrir sem ela mostraria
+     transporte, nota e embalagem vazios numa solicitação, e o salvar voltaria a
+     cobrá-los. O limparForm acima já deixou o padrão em "Peça recebida". */
+  if(d.soOrcamento==='Sim'){
+    sel.tipoFicha='Só orçamento';
+    document.querySelectorAll('#tipoFicha .chip').forEach(function(c){
+      c.classList.toggle('on', c.dataset.v==='Só orçamento');
+    });
+    aplicarTipoFicha();
+  }
   setV('resp',d.resp);setV('data',d.data);setV('cliente',d.cliente);setV('contato',d.contato);setV('fone',d.fone);
   setV('nf',d.nf);setV('obs',d.obs);
   if(d.nf==='SEM NOTA'){var _sn=document.getElementById('nfSemNota');if(_sn){_sn.checked=true;toggleSemNota();}}
@@ -5173,6 +5334,11 @@ function limparForm(ask){
   document.getElementById('pecas').innerHTML='';Object.keys(pecasState).forEach(k=>delete pecasState[k]);
   addPeca();renderFotos();
   modoAdmissao('',false); // mostra tudo de novo (novo recebimento)
+  /* Depois de limpar: a ficha nova nasce como RECEBIMENTO. O Object.keys(sel)
+     acima zera o tipoFicha junto com o resto e o laço dos chips tira o "on" do
+     padrão, então sem isto a ficha nova ficaria sem tipo — e os três cards
+     escondidos continuariam escondidos para o recebimento seguinte. */
+  _tipoFichaPadrao();
   if(ask)toast('Formulário limpo');
 }
 function abrirConfig(){
