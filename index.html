@@ -659,7 +659,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v73';
+const APP_VERSAO='v74';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -2502,9 +2502,14 @@ let _enviarId=null,_enviarDestino='comercial',_enviarPrimeiro=false,_enviarEtapa
    celular para o problema voltar, e ninguém ia lembrar por quê. */
 function _semEmailDoOrcamento(lista){
   var orc=String(EMAIL_ORC||'').toLowerCase().split(/[,;]/).map(function(s){return s.trim();}).filter(Boolean);
-  if(!orc.length)return lista;
+  /* ⚠️ 23/10/2026 — ANTES, com o campo do Orçamento vazio, esta função
+     devolvia a lista DO JEITO QUE FOI DIGITADA. E na Petro ela está escrita com
+     PONTO E VÍRGULA ("vendas1@… ; vendas2@…"), enquanto a conferência do Apps
+     Script separa só por vírgula: ela lia tudo como um endereço só, achava dois
+     arrobas e RECUSAVA o envio — sem nada na tela.
+     Agora a lista é sempre normalizada, com ou sem Orçamento preenchido. */
   return String(lista||'').split(/[,;]/).map(function(s){return s.trim();})
-    .filter(function(x){ return x && orc.indexOf(x.toLowerCase())<0; }).join(', ');
+    .filter(function(x){ return x && (!orc.length || orc.indexOf(x.toLowerCase())<0); }).join(', ');
 }
 function _emailDaArea(a){
   if(a==='cliente'){var e=document.getElementById('envEmailCliente');return e?e.value.trim():'';}
@@ -2664,9 +2669,41 @@ function _atualizaEnvEmailInfo(){
 /* Prefixo do assunto do e-mail, para dar de bater o olho na caixa de entrada
    em que ponto do fluxo o recebimento está. Definido com a Suzana em 18/08/2026.
    O envio ao CLIENTE fica sem prefixo — é comunicação externa. */
+/* ═══ AVARIA — 23/10/2026, decisão da Suzana ═════════════════════════════
+   *"Só manda e-mail para o comercial quando tiver qualquer uma das três
+   condições; se não tiver avaria não envia o e-mail de admissão."*
+
+   O comercial recebia e-mail de TODA admissão e parou de olhar — e-mail que
+   sempre chega vira ruído, e aí o que importa passa junto. Agora só chega o
+   que tem problema, e o assunto já diz qual.
+
+   As três condições, como estão na ficha:
+     · divergência na nota fiscal      (item 4)
+     · embalagem danificada            (item 5)
+     · estado da peça diferente de OK  (item 7: Atenção ou Ruim)
+
+   ⚠️ Vale SÓ para o e-mail da admissão → comercial. A volta do ORÇAMENTO para
+   o comercial ("CUSTO FINALIZADO") continua indo sempre: ali não se está
+   avisando de avaria, se está devolvendo trabalho pronto. */
+function _avariasDa(d){
+  var m=[];
+  if(!d)return m;
+  if(String(d.nfdiv||'')==='Sim') m.push('divergência na nota fiscal');
+  if(String(d.embCond||'')==='Danificada') m.push('embalagem danificada');
+  var ruins=[];
+  (d.pecas||[]).forEach(function(p,i){
+    var e=p&&p.visual&&p.visual.estado;
+    if(e&&String(e)!=='OK') ruins.push('peça '+(i+1)+': '+e);
+  });
+  if(ruins.length) m.push('estado da peça — '+ruins.join(' · '));
+  return m;
+}
+function _ehAdmissaoParaComercial(dest,etapaAnt){
+  return dest==='comercial' && String(etapaAnt||'')!=='orcamento';
+}
 function _prefixoAssunto(dest,etapaAtual){
   if(dest==='orcamento')return 'CUSTO PENDENTE — ';
-  if(dest==='comercial')return (etapaAtual==='orcamento')?'CUSTO FINALIZADO — ':'ADMISSÃO RECEBIDA — ';
+  if(dest==='comercial')return (etapaAtual==='orcamento')?'CUSTO FINALIZADO — ':'ADMISSÃO COM AVARIA — ';
   if(dest==='admissao')return 'DEVOLVIDO PARA A ADMISSÃO — ';
   return '';
 }
@@ -2715,11 +2752,24 @@ function confirmarEnviar(){
   if(dest!=='cliente'&&SHEET_URL)_etapaEnviada=postSheet(SHEET_URL,{action:'etapa',id:id,etapa:dest});
   if(typeof window._fbForcarEnvio==='function')setTimeout(window._fbForcarEnvio,300);
   var nomeArea=AREAS[dest].nome;
+  /* A REGRA DA AVARIA (23/10/2026). A ficha anda normalmente — etapa, planilha
+     e nuvem já foram gravadas acima. O que depende da avaria é só o E-MAIL. */
+  var _avarias=_ehAdmissaoParaComercial(dest,_etapaAnt)?_avariasDa(d):[];
+  var _mandaEmail=!_ehAdmissaoParaComercial(dest,_etapaAnt)||_avarias.length>0;
   var assunto=_prefixoAssunto(dest,_etapaAnt)+_tituloFicha(d);
   var intro=(dest==='orcamento'?'Segue a ficha para orçamento (preencher Molde/Fórmula/Peso/Preço no app):':(dest==='admissao'?'Recebimento devolvido à admissão para corrigir/completar:':(dest==='cliente'?'Segue a confirmação do recebimento do seu material na Borrachas Petro:':'Recebimento para o comercial conferir/completar no app:')));
   fecharEnviar();
   function mandar(dd){
-    var payload={action:'email',id:id,to:to,assunto:assunto,resumo:intro+'\n\n'+montarTexto(dd)+(dest==='orcamento'?('\n\n'+_resumoOrc(dd)):'')};
+    /* Sem avaria, a ficha segue para o comercial pelo app e NÃO sai e-mail.
+       O aviso diz as duas coisas, para ninguém achar que o envio falhou. */
+    if(!_mandaEmail){
+      var lbl0=document.getElementById('origemLbl');
+      renderFromArray(LISTA_ATUAL,lbl0?lbl0.textContent:'',ACOES_ATUAL);
+      toast('Enviado para '+nomeArea+' ✓ — sem avaria, não mandei e-mail');
+      return;
+    }
+    var _motivos=_avarias.length?('AVARIA: '+_avarias.join(' | ')+'\n\n'):'';
+    var payload={action:'email',id:id,to:to,assunto:assunto,resumo:_motivos+intro+'\n\n'+montarTexto(dd)+(dest==='orcamento'?('\n\n'+_resumoOrc(dd)):'')};
     if(anexar && window.jspdf && window.jspdf.jsPDF){
       try{ var doc=gerarPDFdoc(dd); payload.mime='application/pdf'; payload.nome=_pdfFileName(dd); payload.arquivo=doc.output('datauristring'); }catch(e){console.error(e);}
     }
@@ -2958,6 +3008,14 @@ function gerarRelatorio(d){
     x.fillStyle='#FFCC00';x.font='bold 12px Arial';x.textAlign='center';
     x.fillText('R 02-1 · App de Recebimento · Borrachas Petro · '+d.criado,W/2,H-20);x.textAlign='left';
     if(SHEET_URL&&EMAIL_COM){
+      /* Reenvio manual: a regra da avaria vale aqui também, mas quem clicou
+         está olhando a ficha e pode ter motivo. Então pergunta, em vez de
+         recusar calado. 23/10/2026. */
+      var _av=(typeof _avariasDa==='function')?_avariasDa(d):[];
+      if(!_av.length && !confirm('Esta ficha não tem avaria (nota, embalagem ou estado da peça).\n\n'+
+        'Pela regra, a admissão sem avaria não manda e-mail ao comercial.\n\nEnviar assim mesmo?')){
+        toast('Não enviei — sem avaria'); return;
+      }
       const b64=cv.toDataURL('image/jpeg',0.85);
       postSheet(SHEET_URL,{action:'email',id:d.id,to:_emailDaArea('comercial'),assunto:'ADMISSÃO RECEBIDA — '+_tituloFicha(d),resumo:montarTexto(d),arquivo:b64,nome:'Recebimento_'+(d.cliente||'rolo').replace(/\s/g,'_')+'.jpg'});
       toast('Enviado por e-mail ao comercial'); return;
