@@ -32,7 +32,7 @@
    mesmo APP_VERSAO do index.html. Isso apaga a cópia antiga dos aparelhos.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const CACHE_NOME = 'petro-recebimento-v75';
+const CACHE_NOME = 'petro-recebimento-v76';
 
 // O mínimo para o app abrir sem internet.
 const ESSENCIAIS = [

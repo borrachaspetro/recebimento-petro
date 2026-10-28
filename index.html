@@ -436,6 +436,30 @@
           <input type="file" accept="image/*" capture="environment" multiple style="display:none" onchange="addFotos(event)">
         </label>
       </div>
+      <!-- ═══ ANEXAR ARQUIVO — 28/10/2026 ════════════════════════════════════
+           Pedido da Suzana: *"não precisa tirar foto para ter que fazer com o
+           celular. Pode ter uma opção de incluir arquivo, anexar arquivo que daí
+           vem do computador, que geralmente elas recebem desenho do cliente ou
+           algum e-mail (...) elas anexam PDF, porque elas não vão tirar foto do
+           desenho."*
+
+           POR QUE É UM BOTÃO SEPARADO, e não o mesmo "Adicionar" de cima:
+           · o de cima tem `capture="environment"`, que no celular abre a CÂMERA
+             direto — era isso que obrigava a fotografar;
+           · e a foto vira JPEG passando por um canvas. PDF não passa por canvas:
+             precisa ser guardado como o arquivo que é.
+           Aqui não há `capture`, então no computador abre o explorador de
+           arquivos e no celular deixa escolher da galeria ou dos arquivos. -->
+      <div style="margin-top:12px">
+        <div class="grp" style="font-size:12px;color:#8a6d00">📎 Arquivos do cliente (PDF, desenho, e-mail)</div>
+        <div class="hint" style="margin-top:2px">Para o desenho ou o PDF que o cliente mandou. Vai <b>junto no e-mail</b> para quem vai orçar.</div>
+        <label class="addphoto" style="width:auto;padding:10px 14px;display:inline-flex;gap:8px;align-items:center">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+          Anexar arquivo
+          <input type="file" accept="application/pdf,image/*" multiple style="display:none" onchange="addAnexos(event)">
+        </label>
+        <div id="anexos" style="margin-top:8px"></div>
+      </div>
       <!-- ═══ TODAS AS FOTOS DESTE RECEBIMENTO — 28/08/2026 ═══════════════
            A Suzana abria o item 8 e via vazio, mesmo com a foto da peça sendo
            obrigatória. Estava certo: o item 8 só tinha as fotos EXTRAS, e as
@@ -673,6 +697,17 @@
 
 <script>
 let fotos=[], editId=null, pecaSeq=0;
+/* Arquivos anexados pelo cliente (28/10/2026) — cada um é
+   {nome, tipo, src}, com `src` em data URL, do mesmo jeito que as fotos.
+   Ficam fora do array `fotos` de propósito: foto é imagem e vira JPEG por um
+   canvas; anexo pode ser PDF e tem de chegar inteiro do outro lado. */
+let anexos=[];
+/* Teto por arquivo. O e-mail do Google aceita 25 MB no total e o envio ainda
+   passa pelo Apps Script, que é justamente onde a rede das máquinas do
+   comercial falha — arquivo grande ali é o que mais tem chance de não sair.
+   6 MB cobre desenho em PDF com folga; acima disso o app recusa e DIZ por quê,
+   em vez de deixar a pessoa achar que mandou. */
+const ANEXO_MAX_MB=6;
 const sel={transp:'',nfdiv:'',embCond:'',embConserto:'',embNovaCaixa:'',servico:'',confcli:'',tipoFicha:'Peça recebida'};
 /* SÓ ORÇAMENTO — 23/10/2026. Uma pergunta só, feita no item 1, manda em tudo o
    que vem depois: o que aparece na tela, o que é cobrado, para onde a ficha vai
@@ -688,7 +723,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v75';
+const APP_VERSAO='v76';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -2119,6 +2154,63 @@ function addFotos(e){
   });
   e.target.value='';
 }
+/* ═══ ANEXOS DO CLIENTE — 28/10/2026 ═══════════════════════════════════════
+   Diferente das fotos em dois pontos que importam:
+   · o arquivo NÃO passa por canvas — um PDF tem de chegar inteiro em quem orça;
+   · por isso ele é guardado com nome e tipo, que são o que o e-mail precisa
+     para o anexo chegar com cara de arquivo, e não de "anexo1.bin". */
+function addAnexos(e){
+  var lista=[].slice.call(e.target.files||[]);
+  e.target.value='';                       // deixa escolher o mesmo arquivo de novo
+  lista.forEach(function(f){
+    if(f.size > ANEXO_MAX_MB*1024*1024){
+      toast('"'+f.name+'" tem '+(f.size/1024/1024).toFixed(1)+' MB e o limite é '+ANEXO_MAX_MB+' MB — não anexei');
+      return;
+    }
+    var ok=/^application\/pdf$/.test(f.type)||/^image\//.test(f.type);
+    if(!ok){ toast('"'+f.name+'" não é PDF nem imagem — não anexei'); return; }
+    var r=new FileReader();
+    r.onload=function(ev){
+      anexos.push({nome:f.name, tipo:f.type, src:ev.target.result});
+      renderAnexos();
+      toast('Anexado: '+f.name);
+    };
+    r.onerror=function(){ toast('Não consegui ler "'+f.name+'"'); };
+    r.readAsDataURL(f);
+  });
+}
+function delAnexo(i){ anexos.splice(i,1); renderAnexos(); }
+function abrirAnexo(i){
+  var a=anexos[i]; if(!a)return;
+  /* Abre numa aba. PDF não renderiza em <img>, então não cabe no visualizador
+     de fotos — e quem anexou quer conferir se mandou o arquivo certo. */
+  try{
+    var w2=window.open(); if(!w2){ toast('O navegador bloqueou a janela'); return; }
+    if(/^application\/pdf$/.test(a.tipo)) w2.document.write('<iframe src="'+a.src+'" style="border:0;width:100%;height:100%"></iframe>');
+    else w2.document.write('<img src="'+a.src+'" style="max-width:100%">');
+    w2.document.title=a.nome||'anexo';
+  }catch(err){ toast('Não consegui abrir o anexo'); }
+}
+function renderAnexos(){
+  var box=document.getElementById('anexos'); if(!box)return;
+  if(!anexos.length){ box.innerHTML=''; return; }
+  box.innerHTML=anexos.map(function(a,i){
+    var ehPdf=/^application\/pdf$/.test(a.tipo);
+    var kb=Math.round((String(a.src||'').length*0.75)/1024);
+    return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;margin-bottom:6px;'+
+      'background:#FFF8DC;border-left:4px solid #FFCC00;border-radius:6px;font-size:13px">'+
+      '<span style="font-size:16px">'+(ehPdf?'📄':'🖼️')+'</span>'+
+      '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+
+        _esc(a.nome||'arquivo')+' <span style="opacity:.7">('+(kb>=1024?((kb/1024).toFixed(1)+' MB'):(kb+' KB'))+')</span></span>'+
+      '<button type="button" class="ic" title="Abrir" onclick="abrirAnexo('+i+')">👁</button>'+
+      '<button type="button" class="ic icdel" title="Tirar" onclick="delAnexo('+i+')">×</button>'+
+    '</div>';
+  }).join('');
+}
+/* nome de arquivo vem do computador da pessoa: nunca entra cru no HTML */
+function _esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+
 function renderFotos(){ setTimeout(function(){try{renderTodasFotos();}catch(e){}},0);
   const box=document.getElementById('photos');const add=box.querySelector('.addphoto');
   box.querySelectorAll('.photo').forEach(p=>p.remove());
@@ -2883,6 +2975,14 @@ function confirmarEnviar(){
     if(anexar && window.jspdf && window.jspdf.jsPDF){
       try{ var doc=gerarPDFdoc(dd); payload.mime='application/pdf'; payload.nome=_pdfFileName(dd); payload.arquivo=doc.output('datauristring'); }catch(e){console.error(e);}
     }
+    /* OS ARQUIVOS DO CLIENTE VÃO JUNTO — 28/10/2026 (decisão da Suzana: "sim,
+       junto com a ficha, mas ele continua orçando no app"). Quem orça abre um
+       e-mail só e já tem o desenho na mão; o preenchimento do custo continua
+       sendo no app, como sempre foi. */
+    var _anx=(dd.anexos||[]).filter(function(a){return a&&a.src;});
+    if(_anx.length)payload.anexos=_anx.map(function(a){
+      return {nome:a.nome||'anexo', mime:a.tipo||'application/octet-stream', arquivo:a.src};
+    });
     /* Espera a gravação da etapa antes de mandar o e-mail. O `no-cors` resolve
        assim que a requisição sai, não quando o script termina — por isso a
        folga de 1,2s. Quem garante mesmo é o LockService no Code.gs; isto aqui
@@ -2986,12 +3086,25 @@ function coletar(pecas){
     assinanteNome:val('assNome'), assinanteDoc:val('assDoc'),
     assinadoEm:((typeof assImagem==='function'&&assImagem())
       ? (prev.assinadoEm||new Date().toLocaleString('pt-BR')) : ''),
-    pecas:pecas,fotos:[...fotos],obs:val('obs'),
+    pecas:pecas,fotos:[...fotos],
+    /* Anexos do cliente (28/10/2026). Como as fotos, o conteúdo sai daqui antes
+       de ir para a nuvem (ver _fotosEnviarNuvem) — o que fica na ficha é a
+       lista; o arquivo mesmo mora no Storage. */
+    anexos:anexos.map(function(a){return {nome:a.nome,tipo:a.tipo,src:a.src};}),
+    obs:val('obs'),
     /* SÓ ORÇAMENTO — 23/10/2026. Gravado como 'Sim' ou vazio, nunca como
        true/false: o valor vai para uma célula da planilha e volta de lá como
        texto. Ver a coluna "Só orçamento (sem peça)" no Code.gs. */
     soOrcamento:_soOrcamento()?'Sim':'',
-    criado:new Date().toLocaleString('pt-BR')
+    /* ⚠️ O HORÁRIO DA ADMISSÃO NÃO PODE SER REESCRITO — 28/10/2026.
+       Até aqui, `criado` recebia a hora de AGORA toda vez que a ficha era
+       salva, inclusive numa edição. Resultado: a admissão feita às 17:40
+       passava a dizer 09:15 assim que alguém abrisse e salvasse no dia
+       seguinte — justamente o rastro que a Suzana quer ter de volta.
+       Agora o carimbo da criação é preservado, e a edição fica registrada
+       à parte, em `alteradoEm`. */
+    criado: prev.criado || new Date().toLocaleString('pt-BR'),
+    alteradoEm: editId ? new Date().toLocaleString('pt-BR') : ''
   };
 }
 
@@ -3218,8 +3331,15 @@ function gerarPDFdoc(d,semFotos){
     if(d.soOrcamento==='Sim')
       recRows=[['Peça recebida','NÃO — só solicitação'],['Nota fiscal','não há'],
                ['Base do orçamento','informações do cliente']];
+    /* QUEM FEZ E A QUE HORAS — 28/10/2026. "Data" é a data do recebimento,
+       digitada no item 1; "Admissão feita em" é o carimbo de quando a ficha foi
+       preenchida no app. São coisas diferentes e por isso aparecem as duas. */
+    var dadosCli=[['Cliente',d.cliente],['Data',fmtData(d.data)],['Responsável',d.resp]];
+    var _em=_registradoEm(d);
+    if(_em)dadosCli.push([(d.soOrcamento==='Sim'?'Solicitação feita em':'Admissão feita em'),_em]);
+    dadosCli.push(['Contato',d.contato],['Fone',d.fone]);
     var blocos=[
-      ['DADOS DO CLIENTE',[['Cliente',d.cliente],['Data',fmtData(d.data)],['Responsável',d.resp],['Contato',d.contato],['Fone',d.fone]]],
+      ['DADOS DO CLIENTE',dadosCli],
       [d.soOrcamento==='Sim'?'SOLICITAÇÃO':'RECEBIMENTO',recRows],
       ['SERVIÇO',[['Serviço',d.servico],['Confirmado c/ cliente',
         d.servico==='Sem informação'?'A DEFINIR':(d.confcli==='Sim'?'Sim':'AINDA NÃO')]]]
@@ -3571,6 +3691,43 @@ function pecaLinhas(p){
   return n+2; // folga p/ quebras de linha
 }
 function fmtData(s){if(!s)return '';const m=(''+s).match(/^(\d{4})-(\d{2})-(\d{2})/);return m?(m[3]+'/'+m[2]+'/'+m[1]):s;}
+
+/* ═══ QUANDO A ADMISSÃO FOI FEITA — 28/10/2026 ═══════════════════════════════
+   Pedido da Suzana: *"antes tinha o nome, a data e o horário... o nome de quem
+   recebeu, a data e o horário que foi feita a admissão. Que daí a gente sabe
+   que horário foi feito"*. Para quê: há quem registre admissão bem depois do
+   expediente e no dia seguinte cobre a equipe por aquilo. Sem o horário na
+   ficha, não dá para saber quando o trabalho foi realmente feito.
+
+   ⚠️ NÃO É A "DATA" DO ITEM 1. Aquela é a data do recebimento, digitada, e pode
+   ser de outro dia. Esta é o carimbo de QUANDO a ficha foi preenchida no app.
+
+   De onde sai, nesta ordem:
+     1. `criado` — carimbo do próprio aparelho, com hora;
+     2. `_ts` — a coluna "Registrado em" da planilha, que também tem hora e é o
+        que chega nos OUTROS aparelhos (o `criado` não vai para a planilha, então
+        quem abre a ficha de outra máquina só tem este).
+   Sem nenhum dos dois (ficha muito antiga), devolve vazio e quem chama
+   simplesmente não mostra a linha — melhor nada do que inventar hora. */
+function _registradoEm(d){
+  if(!d) return '';
+  var s = String(d.criado || d._ts || '').trim();
+  if(!s) return '';
+  /* "26/10/2026 11:00:00" e "26/10/2026 11:00" entram aqui; os segundos saem,
+     porque hora e minuto é o que se lê numa ficha. */
+  var m = s.match(/^(\d{2}\/\d{2}\/\d{4})[ ,]+(\d{2}:\d{2})/);
+  if(m) return m[1] + ' às ' + m[2];
+  var so = s.match(/^(\d{2}\/\d{2}\/\d{4})/);   // veio só a data, sem hora
+  return so ? so[1] : '';
+}
+/* O mesmo, com o nome de quem fez: é a linha que a Suzana pediu de volta. */
+function _quemEQuando(d){
+  if(!d) return '';
+  var q = String(d.resp||'').trim(), em = _registradoEm(d);
+  if(!q && !em) return '';
+  if(!em) return q;
+  return (q ? (q + ' · ') : '') + em;
+}
 function montarTexto(d){
   var _so=(d.soOrcamento==='Sim');
   let t=_so?'*SOLICITAÇÃO DE ORÇAMENTO — Borrachas Petro (R 02-1)*\n⚠️ A peça NÃO foi recebida. Orçamento pelas informações do cliente.\n'
@@ -3592,7 +3749,17 @@ function montarTexto(d){
     if(d.caixaMed)t+='Caixa a fabricar (mm): '+d.caixaMed+'\n';
     if(d.madeira)t+='Madeira a comprar: '+d.madeira+'\n';
   }
+  /* Diz que vai arquivo junto (28/10/2026). Sem esta linha, quem recebe o
+     e-mail pode não reparar no segundo anexo e orçar sem olhar o desenho. */
+  var _anx=(d.anexos||[]).filter(function(a){return a&&(a.nome||a.src);});
+  if(_anx.length)t+='📎 Anexo'+(_anx.length>1?'s':'')+' do cliente: '
+    +_anx.map(function(a){return a.nome||'arquivo';}).join(', ')+'\n';
   t+=(_so?'Solicitado por: ':'Recebido por: ')+d.resp+' · '+fmtData(d.data);
+  /* O horário de quando a ficha foi feita, que a Suzana pediu de volta em
+     28/10. Vai numa linha própria para não se confundir com a data do
+     recebimento, que está logo acima. */
+  var _em=(typeof _registradoEm==='function')?_registradoEm(d):'';
+  if(_em)t+='\n'+(_so?'Solicitação registrada em: ':'Admissão registrada em: ')+_em;
   return t;
 }
 function wrapCount(ctx,text,maxW){ctx.font='13px Arial';const w=(text||'').split(' ');let l='',n=1;
@@ -3664,6 +3831,12 @@ function _limparFotosAntigas(dias){
         (p.furos||[]).forEach(x=>{if(x.foto){x.foto='';mudou=true;}});
       });
       if(d.assinatura){d.assinatura='';mudou=true;}
+      /* ANEXOS DO CLIENTE — 28/10/2026. Entram aqui pelo mesmo motivo das
+         duas de cima: um PDF de desenho pesa MAIS que qualquer foto, e
+         ficar guardado no aparelho depois de subir para o Storage é o jeito
+         mais rápido de repetir a memória cheia de 01 a 07/10. O nome e o
+         tipo ficam: é por eles que a ficha continua sabendo que tem anexo. */
+      (d.anexos||[]).forEach(a=>{ if(a&&a.src){a.src='';mudou=true;} });
     }
   });
   if(mudou){try{localStorage.setItem('petro_receb',JSON.stringify(arr));}catch(e){}}
@@ -3677,6 +3850,8 @@ function _limparFotosAntigas(dias){
    (`_avisoMemoria`), que alerta sobre foto não enviada enquanto dá tempo. */
 function _semTodasFotos(arr){
   return arr.map(d=>{const c=Object.assign({},d);c.fotos=[];c.assinatura='';
+    // anexos do cliente: o conteudo sai, o nome e o tipo ficam (28/10/2026)
+    c.anexos=(c.anexos||[]).map(a=>Object.assign({},a,{src:''}));
     if(c.pecas)c.pecas=c.pecas.map(p=>{const pp=Object.assign({},p);pp.desenhoFoto='';pp.fotosPeca=[];
       if(pp.ponteiras)pp.ponteiras=pp.ponteiras.map(x=>Object.assign({},x,{foto:''}));
       if(pp.furos)pp.furos=pp.furos.map(x=>Object.assign({},x,{foto:''}));return pp;});
@@ -4663,7 +4838,10 @@ function filtrarLista(){
     const _pcs=_np+' item(ns)'+(_tq?(' · '+_tq+' pç'):'');
     return `<div class="saved-item">
       <div style="flex:1;min-width:0"><b>${d.cliente||'—'}</b> ${d.nf?('· NF '+d.nf):''} ${selo} ${badge}<br>
-      <span class="mini">${d.servico||''} · ${_pcs} · ${fmtData(d.data)}${d.resp?(' · '+d.resp):''}</span></div>
+      <!-- quem fez e a que horas (28/10/2026): na lista, logo abaixo do cliente,
+           que é onde a Suzana bate o olho para saber quando a admissão foi feita -->
+      <span class="mini">${d.servico||''} · ${_pcs} · ${fmtData(d.data)}${d.resp?(' · '+d.resp):''}</span>
+      ${_registradoEm(d)?`<br><span class="mini" style="opacity:.85">🕒 ${d.soOrcamento==='Sim'?'solicitada':'admitida'} em ${_registradoEm(d)}</span>`:''}</div>
       <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
         <button class="ic" title="Editar" onclick="carregarParaEditar('${d.id}')">✏️</button>
         <button class="ic" title="Abrir o PDF na tela (com opção de imprimir)" style="color:#C0392B;font-weight:800;font-size:12px" onclick="verPDF('${d.id}')">PDF</button>
@@ -5116,6 +5294,8 @@ function carregarParaEditar(id){
     if(d.etapa==='orcamento'||_temOrc){ var ob=pe.querySelector('.orcBlock'); if(ob)ob.classList.remove('hide'); }
   });
   fotos=(d.fotos&&Array.isArray(d.fotos))?d.fotos.slice():[];renderFotos();
+  // anexos do cliente (28/10/2026): reabrir a ficha tem de trazê-los de volta
+  anexos=(d.anexos&&Array.isArray(d.anexos))?d.anexos.slice():[];renderAnexos();
   // assinatura do cliente (Desenvolvimento) — imagem pode chegar depois, pela nuvem
   setV('assNome',d.assinanteNome); setV('assDoc',d.assinanteDoc);
   if(typeof assCarregar==='function')assCarregar(d.assinatura||'');
@@ -5313,7 +5493,7 @@ function fecharEdicao(){
 }
 function limparForm(ask){
   if(ask&&!confirm('Limpar o formulário?'))return;
-  editId=null;fotos=[];embTipoSel.clear();
+  editId=null;fotos=[];anexos=[];embTipoSel.clear();
   var _eb=document.getElementById('edBarra'); if(_eb&&!editId)_eb.classList.add('hide');
   var _bf=document.getElementById('btFechar'); if(_bf&&!editId)_bf.classList.add('hide');
   ['resp','cliente','contato','fone','transpDesc','nf','embTipoDesc','servicoDesc','obs','nfQtdeNota','nfQtdeReceb','assNome','assDoc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
@@ -5332,7 +5512,7 @@ function limparForm(ask){
   document.getElementById('alertaConf').style.display='none';
   document.getElementById('errbox').classList.remove('show');
   document.getElementById('pecas').innerHTML='';Object.keys(pecasState).forEach(k=>delete pecasState[k]);
-  addPeca();renderFotos();
+  addPeca();renderFotos();renderAnexos();
   modoAdmissao('',false); // mostra tudo de novo (novo recebimento)
   /* Depois de limpar: a ficha nova nasce como RECEBIMENTO. O Object.keys(sel)
      acima zera o tipoFicha junto com o resto e o laço dos chips tira o "on" do
@@ -5825,6 +6005,15 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
   function _semFotos(receb){
     return (receb||[]).map(function(r){
       var c=Object.assign({}, r); c.fotos=[]; c.assinatura=''; // imagem vai no doc de fotos
+      /* ⚠️ O ANEXO DO CLIENTE TAMBÉM NÃO PODE VIR PARA CÁ — 28/10/2026.
+         Este documento é o da sincronização em tempo real, e ele tem limite de
+         1 MB. Um PDF de desenho sozinho passa disso: a gravação passaria a ser
+         recusada EM SILÊNCIO e o tempo real morreria para todos os aparelhos,
+         igual ao que as nove fotos causaram em 28/08. O arquivo mora no
+         Storage (slot anexo-N); aqui ficam só o nome e o tipo.
+         Quem pegou isto foi o `teste-sincronizacao`, comparando os campos do
+         _slots com os que esta função limpa. */
+      c.anexos=(c.anexos||[]).map(function(a){ var b=Object.assign({},a); b.src=''; return b; });
       if(c.pecas) c.pecas=c.pecas.map(function(p){
         var pp=Object.assign({}, p);
         if('desenhoFoto' in pp) pp.desenhoFoto='';
@@ -6023,6 +6212,8 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
     if(!d) return false;
     if(d.assinatura) return true;
     if((d.fotos||[]).length) return true;
+    // anexo do cliente tambem sobe para o Storage (28/10/2026)
+    if((d.anexos||[]).some(function(a){return a&&a.src;})) return true;
     return (d.pecas||[]).some(function(p){
       return (p&&p.desenhoFoto) ||
         ((p&&p.fotosPeca)||[]).some(function(f){return !!f;}) ||
@@ -6036,6 +6227,9 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
     var out=[];
     if(d.assinatura) out.push({slot:'assinatura',src:d.assinatura});
     (d.fotos||[]).forEach(function(f,i){ if(f)out.push({slot:'geral-'+i,src:f}); });
+    /* Arquivos que o cliente mandou (28/10/2026). Vao para o mesmo lugar das
+       fotos, cada um no seu slot, para sairem do aparelho depois de subir. */
+    (d.anexos||[]).forEach(function(a,i){ if(a&&a.src)out.push({slot:'anexo-'+i,src:a.src}); });
     (d.pecas||[]).forEach(function(p,i){
       if(!p)return;
       (p.fotosPeca||[]).forEach(function(f,j){ if(f)out.push({slot:'p'+i+'-foto-'+j,src:f}); });
@@ -6055,6 +6249,8 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
     if(slot==='assinatura')return !!d.assinatura;
     var m=slot.match(/^geral-(\d+)$/);
     if(m)return !!((d.fotos||[])[+m[1]]);
+    m=slot.match(/^anexo-(\d+)$/);
+    if(m){ var a=(d.anexos||[])[+m[1]]; return !!(a&&a.src); }
     m=slot.match(/^p(\d+)-(foto|pt|fc)-(\d+)$/);
     if(m){
       var p=(d.pecas||[])[+m[1]]; if(!p)return false;
@@ -6075,6 +6271,13 @@ try{ if(!document.querySelectorAll('#pecas .peca').length) addPeca(); }catch(e){
     if(slot==='assinatura'){ if(!d.assinatura)d.assinatura=src; return; }
     var m=slot.match(/^geral-(\d+)$/);
     if(m){ d.fotos=d.fotos||[]; if(!d.fotos[+m[1]])d.fotos[+m[1]]=src; return; }
+    m=slot.match(/^anexo-(\d+)$/);
+    if(m){ d.anexos=d.anexos||[]; var k=+m[1];
+      /* a ficha ja traz nome e tipo mesmo com o conteudo apagado; se nao
+         trouxer (ficha de outro aparelho), cria a entrada para o arquivo
+         nao se perder so por falta de rotulo */
+      if(!d.anexos[k])d.anexos[k]={nome:'anexo '+(k+1),tipo:''};
+      if(!d.anexos[k].src)d.anexos[k].src=src; return; }
     m=slot.match(/^p(\d+)-(foto|pt|fc)-(\d+)$/);
     if(m){
       var p=(d.pecas||[])[+m[1]]; if(!p)return;
