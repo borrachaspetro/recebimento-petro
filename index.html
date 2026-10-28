@@ -723,7 +723,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v76';
+const APP_VERSAO='v77';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1545,6 +1545,27 @@ function addPeca(){
     </div><div class="revmed">
       <label>Comp. borracha medido</label><input type="text" inputmode="decimal" class="p_compmed">
     </div></div>
+    <!-- ═══ QUEM PEDIU A MEDIDA — 28/10/2026 ═══════════════════════════════
+         Pedido da Suzana: *"no campo das medidas solicitadas, incluir uma
+         caixinha para saber se foi solicitada pelo cliente na admissão ou pelo
+         comercial"*.
+
+         Por que importa: a medida solicitada é o que a peça TEM DE FICAR, e é
+         por ela que a peça é conferida no fim. Quando dá divergência, a primeira
+         pergunta é de onde veio aquele número — do cliente, que trouxe a peça e
+         disse o que queria, ou do comercial, que fechou com ele antes. Hoje a
+         ficha guarda o número e perde a origem.
+
+         Vale para TODAS as medidas solicitadas da peça (Ø externo, comprimento
+         e a dureza solicitada, logo abaixo): na prática elas vêm todas da mesma
+         conversa. Uma caixinha por campo seria três vezes o mesmo clique. -->
+    <div data-blk="medorigem" style="margin-top:4px">
+      <div class="grp" style="font-size:12px;color:#8a6d00">Quem pediu estas medidas?</div>
+      <div class="seg origseg" data-pid="${id}">
+        <button data-v="Cliente">Cliente (na admissão)</button>
+        <button data-v="Comercial">Comercial</button>
+      </div>
+    </div>
     </div>
 
     <div data-blk="espec">
@@ -1866,6 +1887,13 @@ function addPeca(){
      daquela forma. Os rótulos mudam em vez de a tela encher de campo vazio.  */
   ligarPecaTecnica(div, id);
 
+  // quem pediu as medidas solicitadas: o cliente na admissão, ou o comercial (28/10/2026)
+  div.querySelectorAll('.origseg button').forEach(b=>{
+    b.onclick=()=>{
+      div.querySelectorAll('.origseg button').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on'); pecasState[id].medOrigem=b.dataset.v;
+    };
+  });
   // tem desenho? (Sim → foto)
   div.querySelectorAll('.deseg button').forEach(b=>{
     b.onclick=()=>{
@@ -2447,6 +2475,8 @@ function coletarPecas(){
       tipo:_tp,
       dint:g('p_dint'),dextsol:g('p_dextsol'),dextmed:g('p_dextmed'),areautil:g('p_areautil'),
       compsol:g('p_compsol'),compmed:g('p_compmed'),produto:g('p_produto'),
+      // de quem veio a medida solicitada: 'Cliente' ou 'Comercial' (28/10/2026)
+      medOrigem:(st.medOrigem||''),
       qtde:g('p_qtde'),durmed:g('p_durmed'),dursol:g('p_dursol'),
       acab:acab,acabamento:acabamento,acabDados:acabDados,
       /* COLUNAS "Frisado" (AA) e "Bombê" (Z) DA PLANILHA — 25/08/2026
@@ -2615,6 +2645,17 @@ function salvarFicha(enviarDepois){
     if(st.cb!=='S/B'&&faltou('p_durmed'))erros.push(n+'Dureza medida/cor (escreva NA se não tiver)');
     // RETÍFICA não tem dureza solicitada: a borracha já está no rolo, só se mede
     if(_modoSrv!=='retifica'&&faltou('p_dursol'))erros.push(n+'Dureza solicitada (escreva NA se não tiver)');
+    /* QUEM PEDIU A MEDIDA — 28/10/2026. Só é cobrado quando existe medida
+       solicitada de verdade: "NA" nos três campos quer dizer que ninguém pediu
+       medida nenhuma, e aí perguntar de quem veio não faz sentido. Cobrar
+       assim mesmo seria mais um campo para preencher com NA toda vez — e campo
+       que se preenche com NA sempre é campo que ninguém lê depois. */
+    var _temSol=['p_dextsol','p_compsol','p_dursol'].some(function(cls){
+      var el=pe.querySelector('.'+cls); if(!el)return false;
+      var v=String(el.value||'').trim();
+      return v && v.toUpperCase()!=='NA';
+    });
+    if(_temSol&&!st.medOrigem)erros.push(n+'Quem pediu estas medidas? (cliente ou comercial)');
     if(!st.desenhoSN)erros.push(n+'Tem desenho?');
     if(!st.acab)erros.push(n+'Tipo de acabamento?');
     else if(st.acab==='Sim'){
@@ -3020,6 +3061,7 @@ const _ROTULOS={resp:'Responsável',data:'Data',cliente:'Cliente',contato:'Conta
 const _ROTULOS_PECA={cb:'C/B ou S/B',tipo:'Tipo de peça',produto:'Produto',qtde:'Qtde',
   dint:'Ø int ferro',dextsol:'Ø ext sol',dextmed:'Ø ext med',areautil:'Comp área útil',
   compsol:'Comp borr sol',compmed:'Comp borr med',durmed:'Dureza med/cor',dursol:'Dureza sol',
+  medOrigem:'Medidas pedidas por',
   peso:'Peso',acabamento:'Acabamento',acess:'Acessórios',estado:'Estado geral',garantia:'Garantia',garMotivo:'Motivo da garantia',
   molde:'Molde',formula:'Fórmula',pesoOrc:'Peso orçamento',preco:'Preço'};
 function _diffFicha(antes,depois){
@@ -3191,6 +3233,8 @@ function gerarRelatorio(d){
     if(p.dint)m.push('Ø int '+p.dint);if(p.dextsol)m.push('Ø ext sol '+p.dextsol);
     if(p.dextmed)m.push('Ø ext med '+p.dextmed);if(p.areautil)m.push('Área útil '+p.areautil);
     if(p.compsol)m.push('Comp sol '+p.compsol);if(p.compmed)m.push('Comp med '+p.compmed);
+    // de quem veio a medida solicitada (28/10/2026)
+    if(p.medOrigem)m.push('pedidas por '+p.medOrigem);
     lv('Medidas (mm):', m.join('   ·   '));
     const e=[];
     if(p.produto)e.push('Produto '+p.produto);if(p.qtde)e.push('Qtde '+p.qtde);
@@ -3382,6 +3426,9 @@ function gerarPDFdoc(d,semFotos){
       {h:'Qtde',w:11,g:function(p){return p.qtde||'';}},
       {h:'Dur med/cor',w:18,g:function(p){return p.durmed||'';}},
       {h:'Dur sol',w:14,g:function(p){return p.dursol||'';}},
+      // de quem veio a medida solicitada (28/10/2026): quando der divergência,
+      // é a primeira coisa que se pergunta
+      {h:'Pedido por',w:14,g:function(p){return p.medOrigem||'';}},
       {h:'Acabamento',w:24,g:function(p){return p.acabamento||(p.acab==='Não'?'Não':'');}},
       {h:'Acessórios',w:20,g:function(p){return p.acess||(p.acessSN==='Não'?'Não':'');}},
       {h:'Ponteira',w:22,g:function(p){return _insp(p,'ponteira');}},
@@ -3709,16 +3756,39 @@ function fmtData(s){if(!s)return '';const m=(''+s).match(/^(\d{4})-(\d{2})-(\d{2
         quem abre a ficha de outra máquina só tem este).
    Sem nenhum dos dois (ficha muito antiga), devolve vazio e quem chama
    simplesmente não mostra a linha — melhor nada do que inventar hora. */
+/* Date → "26/10/2026 às 17:42", na hora local de quem está olhando. */
+function _horaBonitaData(dt){
+  var dd=function(n){return (n<10?'0':'')+n;};
+  return dd(dt.getDate())+'/'+dd(dt.getMonth()+1)+'/'+dt.getFullYear()
+    +' às '+dd(dt.getHours())+':'+dd(dt.getMinutes());
+}
 function _registradoEm(d){
   if(!d) return '';
-  var s = String(d.criado || d._ts || '').trim();
+  var bruto = d.criado || d._ts || '';
+  /* ⚠️ A COLUNA DA PLANILHA PODE CHEGAR COMO DATA, NÃO COMO TEXTO — 28/10/2026.
+     O Code.gs grava o carimbo como texto ("26/10/2026 17:42"), mas o Google
+     Sheets reconhece aquilo como data e converte a célula sozinho. Na leitura
+     volta um Date, que no caminho até aqui vira ISO ("2026-10-26T20:42:00Z").
+     Foi por isso que a hora não apareceu nas fichas que vêm da planilha — as
+     outras colunas de data já passavam por um formatador, esta não.
+     Aceita os três formatos: texto brasileiro, Date e ISO. */
+  if(bruto instanceof Date && !isNaN(bruto)) return _horaBonitaData(bruto);
+  var s = String(bruto||'').trim();
   if(!s) return '';
-  /* "26/10/2026 11:00:00" e "26/10/2026 11:00" entram aqui; os segundos saem,
-     porque hora e minuto é o que se lê numa ficha. */
+  /* "26/10/2026 11:00:00" e "26/10/2026 11:00"; os segundos saem, porque hora e
+     minuto é o que se lê numa ficha. */
   var m = s.match(/^(\d{2}\/\d{2}\/\d{4})[ ,]+(\d{2}:\d{2})/);
   if(m) return m[1] + ' às ' + m[2];
+  // ISO, de uma célula que o Sheets converteu em data
+  if(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s)){
+    var dt = new Date(s);
+    if(!isNaN(dt)) return _horaBonitaData(dt);
+  }
   var so = s.match(/^(\d{2}\/\d{2}\/\d{4})/);   // veio só a data, sem hora
-  return so ? so[1] : '';
+  if(so) return so[1];
+  // "2026-10-26" seco, sem hora: devolve a data no formato de quem lê
+  var si = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return si ? (si[3]+'/'+si[2]+'/'+si[1]) : '';
 }
 /* O mesmo, com o nome de quem fez: é a linha que a Suzana pediu de volta. */
 function _quemEQuando(d){
@@ -5096,6 +5166,11 @@ function carregarParaEditar(id){
     const set=(cls,v)=>{const i=pe.querySelector('.'+cls);if(i)i.value=_v(v);}; // preserva o zero
     set('p_dint',p.dint);set('p_dextsol',p.dextsol);set('p_dextmed',p.dextmed);set('p_areautil',p.areautil);
     set('p_compsol',p.compsol);set('p_compmed',p.compmed);set('p_produto',p.produto);
+    // quem pediu a medida (28/10/2026): remarca o botão ao reabrir a ficha
+    if(p.medOrigem){
+      const _bo=[].slice.call(pe.querySelectorAll('.origseg button')).find(x=>x.dataset.v===p.medOrigem);
+      if(_bo)_bo.click();
+    }
     set('p_qtde',p.qtde);set('p_durmed',p.durmed);set('p_dursol',p.dursol);set('p_peso',p.peso);
     set('p_molde',p.molde);set('p_formula',p.formula);set('p_pesoorc',p.pesoOrc);set('p_preco',p.preco);
     set('p_info',p.info);   // texto livre da peça técnica / desenvolvimento
