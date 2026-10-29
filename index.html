@@ -723,7 +723,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v78';
+const APP_VERSAO='v79';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -779,6 +779,33 @@ function aplicarTipoFicha(){
       if(c)c.querySelectorAll('.chip.on,.seg button.on').forEach(function(x){x.classList.remove('on','ok','bad');});
     });
   }
+  /* ═══ SÓ ORÇAMENTO: O QUE NÃO SE MEDE — 29/10/2026 ═══════════════════════
+     Pedido da Mari, pela Suzana: *"tire do aplicativo as partes que são
+     medidas, porque se a peça não tá aqui ela não foi medida. Deixa só a parte
+     solicitada (...) tem muita coisa pra preencher e não tem nada ali."*
+
+     Ela está certa, e o problema era de desenho meu: o bloco "Medições" mistura
+     duas coisas diferentes — o que o cliente PEDIU (Ø ext. solicitado, comp.
+     solicitado, dureza solicitada) e o que alguém MEDIU na peça (Ø ext. medido,
+     comp. medido, dureza medida). Sem a peça, metade do bloco é campo morto.
+
+     Some o que só existe com a peça na mão:
+     · os três campos "medido" — já marcados com a classe `.revmed`;
+     · a Inspeção visual inteira (ponteira, furo de centro, estado geral), que é
+       alguém olhando a peça.
+     FICA o que o orçamento precisa para sair: Ø interno do ferro, os
+     solicitados, comprimento útil, tipo de peça, quantidade, acabamento,
+     acessório e desenho. Tirar esses deixaria quem orça sem o que orçar. */
+  document.querySelectorAll('.peca').forEach(function(pe){
+    pe.querySelectorAll('.revmed').forEach(function(x){ if(so)x.classList.add('hide'); });
+    /* "Chegou com ou sem revestimento?" não cabe numa peça que não chegou. A
+       resposta continua sendo necessária (revestir do zero custa diferente de
+       retificar o que já tem), muda só a pergunta. */
+    var rot=pe.querySelector('[data-blk="rev"] .grp');
+    if(rot)rot.innerHTML = so
+      ? 'A peça tem revestimento? <span style="color:var(--vermelho)">*</span>'
+      : 'Chegou com ou sem revestimento? <span style="color:var(--vermelho)">*</span>';
+  });
   /* A assinatura depende das duas perguntas (tipo de ficha e tipo de serviço),
      então quem decide é sempre o aplicarModoServico. */
   if(typeof aplicarModoServico==='function')aplicarModoServico();
@@ -1158,6 +1185,13 @@ function _modoServico(){
 function aplicarModoServico(){
   var modo=_modoServico();
   var esconder=_BLOCOS_ESCONDIDOS[modo]||_BLOCOS_ESCONDIDOS.normal;
+  /* SÓ ORÇAMENTO — 29/10/2026: a Inspeção visual é alguém olhando a peça, e a
+     peça não está aqui. Entra NESTA lista, e não no aplicarTipoFicha, porque é
+     este laço que decide a visibilidade de todo bloco `data-blk` — escondê-la
+     em outro lugar não adianta: a primeira troca de serviço traria de volta. */
+  if(typeof _soOrcamento==='function' && _soOrcamento() && esconder.indexOf('insp')<0){
+    esconder = esconder.concat(['insp']);
+  }
   document.querySelectorAll('.peca').forEach(function(pe){
     pe.querySelectorAll('[data-blk]').forEach(function(el){
       el.classList.toggle('hide', esconder.indexOf(el.dataset.blk)>=0);
@@ -1172,7 +1206,12 @@ function aplicarModoServico(){
     }
     /* As medições "medido" seguem a regra própria do S/B (classe .revmed).
        Reaplico aqui porque o bloco pode ter acabado de reaparecer. */
-    if(st&&st.cb)pe.querySelectorAll('.revmed').forEach(function(x){ x.classList.toggle('hide',st.cb==='S/B'); });
+    /* Em SÓ ORÇAMENTO os campos "medido" ficam escondidos sempre: a peça não
+       está aqui para ser medida (29/10/2026). Sem este cuidado, responder
+       C/B os traria de volta. */
+    if(st&&st.cb)pe.querySelectorAll('.revmed').forEach(function(x){
+      x.classList.toggle('hide', st.cb==='S/B' || _soOrcamento());
+    });
   });
   /* A assinatura do cliente é o aceite de quem ENTREGOU a peça no balcão. Em
      solicitação de orçamento ninguém entregou nada, então ela não aparece nem
@@ -1867,7 +1906,8 @@ function addPeca(){
       div.querySelectorAll('.cbseg button').forEach(x=>x.classList.remove('on'));
       b.classList.add('on'); pecasState[id].cb=b.dataset.v;
       document.getElementById('cbalert-'+id).classList.toggle('hide',b.dataset.v!=='S/B');
-      div.querySelectorAll('.revmed').forEach(x=>x.classList.toggle('hide',b.dataset.v==='S/B'));
+      // em só orçamento eles continuam escondidos, qualquer que seja a resposta
+      div.querySelectorAll('.revmed').forEach(x=>x.classList.toggle('hide',b.dataset.v==='S/B'||_soOrcamento()));
     };
   });
   // tipo de bombê: só o "dividido em 3" abre os comprimentos das partes
@@ -2653,7 +2693,10 @@ function salvarFicha(enviarDepois){
     if(!st.cb)erros.push(n+'com/sem revestimento');
     // Produto saiu do formulário em 25/08/2026 — quem identifica a peça é o
     // "Tipo de peça". Por isso deixou de ser cobrado aqui.
-    if(st.cb!=='S/B'&&faltou('p_durmed'))erros.push(n+'Dureza medida/cor (escreva NA se não tiver)');
+    /* A dureza MEDIDA sai da tela em só orçamento (ver aplicarTipoFicha), e a
+       regra de sempre vale: não se cobra campo escondido. Era este o campo que
+       fazia a Mari travar numa ficha onde "não tem nada ali" para medir. */
+    if(st.cb!=='S/B'&&!_so&&faltou('p_durmed'))erros.push(n+'Dureza medida/cor (escreva NA se não tiver)');
     // RETÍFICA não tem dureza solicitada: a borracha já está no rolo, só se mede
     if(_modoSrv!=='retifica'&&faltou('p_dursol'))erros.push(n+'Dureza solicitada (escreva NA se não tiver)');
     /* QUEM PEDIU A MEDIDA — 28/10/2026. Só é cobrado quando existe medida
@@ -3775,6 +3818,37 @@ function _horaBonitaData(dt){
 }
 function _registradoEm(d){
   if(!d) return '';
+  /* ═══ A HORA VEM DO ID DA FICHA — 29/10/2026 ═══════════════════════════════
+     ⚠️ ERRO DE PREMISSA MEU, achado com os dados reais que a Suzana mandou.
+     Eu usava a coluna "Registrado em" da planilha como se fosse a hora da
+     admissão. **Ela é a hora em que a ficha CHEGOU na planilha**, não a hora em
+     que foi feita — e quando a máquina está sem rede (o problema conhecido das
+     do comercial) a ficha fica na fila e sobe horas depois:
+
+       ficha       criada (ID)      chegou na planilha
+       Universal   20/10 16:30  ->  21/10 15:17   (23 h depois)
+       Dallbox     28/10 16:35  ->  29/10 00:35   ( 8 h depois)
+       OUROPEÇAS   29/10 08:12  ->  29/10 16:12   ( 8 h depois)
+
+     Resultado na tela: a Mari aparecia lançando às 16:39 o que fez às 08:39.
+     Justamente o contrário do que a Suzana pediu, que é saber a que horas o
+     trabalho foi feito de verdade.
+
+     O ID É o carimbo certo: `Date.now()` do aparelho no instante em que a ficha
+     nasceu (ver `coletar`). Está em toda ficha, desde sempre, e não depende de
+     fila, de fuso de servidor nem de quando o envio conseguiu sair. Nas fichas
+     que subiram na hora, ID e planilha batem minuto a minuto — é só quando há
+     atraso que os dois se separam.
+
+     Os outros dois ficam como reserva, nesta ordem: `criado` (carimbo do
+     aparelho, para ficha cujo ID não seja um relógio) e `_ts` (a planilha). */
+  var ms = Number(d.id);
+  /* Só aceita ID que seja relógio de verdade: de 2001 em diante e não no
+     futuro (com folga de um dia, para aparelho ligeiramente adiantado). */
+  if(isFinite(ms) && ms > 1000000000000 && ms < Date.now() + 864e5){
+    var dt = new Date(ms);
+    if(!isNaN(dt)) return _horaBonitaData(dt);
+  }
   var bruto = d.criado || d._ts || '';
   /* ⚠️ A COLUNA DA PLANILHA PODE CHEGAR COMO DATA, NÃO COMO TEXTO — 28/10/2026.
      O Code.gs grava o carimbo como texto ("26/10/2026 17:42"), mas o Google
