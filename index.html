@@ -723,7 +723,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v77';
+const APP_VERSAO='v78';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -1561,9 +1561,20 @@ function addPeca(){
          conversa. Uma caixinha por campo seria três vezes o mesmo clique. -->
     <div data-blk="medorigem" style="margin-top:4px">
       <div class="grp" style="font-size:12px;color:#8a6d00">Quem pediu estas medidas?</div>
-      <div class="seg origseg" data-pid="${id}">
+      <div class="seg origseg" data-pid="${id}" style="flex-wrap:wrap">
         <button data-v="Cliente">Cliente (na admissão)</button>
         <button data-v="Comercial">Comercial</button>
+        <!-- ⚠️ O NA — 29/10/2026. Pedido da Suzana no dia seguinte ao campo
+             entrar: *"é quando o cliente traz a peça mas não pede nada... eu
+             não consigo dar baixa, fica pedindo para eu completar, mas não é
+             nenhuma dessas duas informações"*.
+
+             Mesma história do NA do tipo de peça técnica (o tanque, 08/10):
+             campo obrigatório que REALMENTE não se aplica trava a pessoa sem
+             que ela entenda por quê — e o trabalho para. Toda pergunta
+             obrigatória deste app precisa de uma saída honesta para o caso em
+             que a resposta não existe. -->
+        <button data-v="NA">NA</button>
       </div>
     </div>
     </div>
