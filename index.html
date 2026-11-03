@@ -240,6 +240,23 @@
         cobrados. Preencha o cliente e descreva a peça com o que ele passou
         (medidas, desenho, foto). Mande para o <b>Orçamento</b> — vai para o Fábio.
       </div>
+      <!-- ═══ O ANEXAR SOBE PARA CÁ NA SOLICITAÇÃO — 03/11/2026 ═════════════
+           Queixa da Suzana: *"na parte de orçamento não está aparecendo a opção
+           de incluir anexar documentos, conforme eu já havia pedido... para que
+           elas consigam fazer pelo computador e não tenham que fazer pelo
+           celular com foto."*
+
+           O botão ESTAVA no app desde a v76 e estava no ar — mas morava no item
+           8, que se chama "Fotos", depois do botão de câmera. Numa ficha de só
+           orçamento quase nada se preenche: quem lança não desce até o item 8
+           nem abre um item chamado "Fotos" para procurar um PDF.
+
+           Existir não é a mesma coisa que ser achado. Então o bloco inteiro de
+           anexos MUDA DE LUGAR quando a ficha é só orçamento: o mesmo bloco, o
+           mesmo input, a mesma lista `anexos` — movido para cá pelo
+           aplicarTipoFicha. Nada é duplicado, porque dois inputs apontando para
+           a mesma lista é o tipo de coisa que diverge depois. -->
+      <div id="anexoNoTopo"></div>
       <div class="row">
         <div>
           <label>Responsável <span class="req">*</span></label>
@@ -426,7 +443,7 @@
 
   <!-- 8. FOTOS -->
   <div class="card">
-    <h2><span class="n">8</span> Fotos</h2>
+    <h2><span class="n">8</span> <span id="tit8">Fotos e arquivos</span></h2>
     <div class="body">
       <div class="hint" style="margin-top:0">Fotos <b>extras</b>: NF, etiqueta, o rolo inteiro, qualquer coisa que não seja de uma peça específica. As fotos da peça, ponteira e furo ficam no <b>item 7</b>, dentro de cada peça.</div>
       <div class="photos" id="photos">
@@ -450,7 +467,7 @@
              precisa ser guardado como o arquivo que é.
            Aqui não há `capture`, então no computador abre o explorador de
            arquivos e no celular deixa escolher da galeria ou dos arquivos. -->
-      <div style="margin-top:12px">
+      <div id="blocoAnexos" style="margin-top:12px">
         <div class="grp" style="font-size:12px;color:#8a6d00">📎 Arquivos do cliente (PDF, desenho, e-mail)</div>
         <div class="hint" style="margin-top:2px">Para o desenho ou o PDF que o cliente mandou. Vai <b>junto no e-mail</b> para quem vai orçar.</div>
         <label class="addphoto" style="width:auto;padding:10px 14px;display:inline-flex;gap:8px;align-items:center">
@@ -723,7 +740,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v79';
+const APP_VERSAO='v80';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -806,6 +823,29 @@ function aplicarTipoFicha(){
       ? 'A peça tem revestimento? <span style="color:var(--vermelho)">*</span>'
       : 'Chegou com ou sem revestimento? <span style="color:var(--vermelho)">*</span>';
   });
+  /* ═══ O ANEXAR TEM DE SER ACHADO — 03/11/2026 ══════════════════════════
+     O bloco de anexos é UM só (ver #blocoAnexos, no item 8). Na solicitação de
+     orçamento ele sobe para o item 1, logo embaixo do aviso amarelo, porque é
+     ali que a pessoa está olhando quando lança uma ficha sem peça. Ao voltar
+     para "Peça recebida" ele desce de novo para o item 8, antes do painel de
+     todas as fotos, que é o lugar original dele.
+
+     Mover o mesmo nó (e não criar um segundo botão) mantém uma lista `anexos`
+     só, um input só e os três pontos de limpeza valendo sem mudança. */
+  var _blocoAnx=document.getElementById('blocoAnexos');
+  var _topoAnx=document.getElementById('anexoNoTopo');
+  var _todas=document.getElementById('todasFotos');
+  if(_blocoAnx&&_topoAnx&&_todas){
+    if(so){
+      if(_blocoAnx.parentNode!==_topoAnx)_topoAnx.appendChild(_blocoAnx);
+    }else{
+      if(_blocoAnx.parentNode!==_todas.parentNode)
+        _todas.parentNode.insertBefore(_blocoAnx,_todas);
+    }
+  }
+  /* O item 8 só se chama "e arquivos" quando os arquivos estão dentro dele. */
+  var _t8=document.getElementById('tit8');
+  if(_t8)_t8.textContent = so ? 'Fotos' : 'Fotos e arquivos';
   /* A assinatura depende das duas perguntas (tipo de ficha e tipo de serviço),
      então quem decide é sempre o aplicarModoServico. */
   if(typeof aplicarModoServico==='function')aplicarModoServico();
