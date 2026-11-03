@@ -740,7 +740,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v80';
+const APP_VERSAO='v81';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -2215,9 +2215,61 @@ function renderDesenho(id){ setTimeout(function(){try{renderTodasFotos();}catch(
   const f=pecasState[id].desenhoFoto||'';
   box.innerHTML=f
     ? `<div class="subthumb"><img src="${f}"><button type="button" class="subrmfoto" onclick="desenhoDelFoto(${id})">×</button></div>`
-    : `<label class="subfotobtn">📷 Foto do desenho<input type="file" accept="image/*" capture="environment" hidden onchange="desenhoFoto(${id},event)"></label>`;
+    : `<label class="subfotobtn">📎 Desenho: foto ou arquivo<input type="file" accept="application/pdf,image/*" hidden onchange="desenhoFoto(${id},event)"></label>`
+      + _dicaDesenhoPdf();
 }
-function desenhoFoto(id,e){const f=e.target.files[0];if(!f){return;}compressImg(f,url=>{pecasState[id].desenhoFoto=url;renderDesenho(id);});e.target.value='';}
+/* O PDF do desenho não cabe dentro da peça: a peça guarda `desenhoFoto`, que é
+   uma IMAGEM e é usada como imagem em três lugares (as fotos que sobem, a
+   galeria de ampliar e o PDF da ficha). Um PDF ali apareceria como imagem
+   quebrada. Então ele vai para Arquivos do cliente, que já sabe carregar PDF,
+   já viaja no e-mail e já é alcançado pelas três limpezas — e o campo do
+   desenho DIZ onde o arquivo foi parar, senão quem anexou acha que perdeu. */
+function _dicaDesenhoPdf(){
+  var ps=(typeof anexos!=='undefined'&&anexos?anexos:[]).filter(function(a){
+    return /pdf/i.test((a&&a.tipo)||'');
+  });
+  if(!ps.length)return '';
+  var nomes=ps.map(function(a){return a.nome||'arquivo';}).join(' · ');
+  return '<div class="hint" style="margin-top:4px;color:#8a6d00">📎 PDF do cliente nesta ficha: <b>'
+    +_esc(nomes)+'</b> — fica em <b>Arquivos do cliente</b> e vai junto no e-mail.</div>';
+}
+/* ═══ O DESENHO CHEGA EM PDF — 03/11/2026 ═══════════════════════════════
+   Segundo lugar da mesma queixa da Suzana: *"para que elas consigam fazer pelo
+   computador e não tenham que fazer pelo celular com foto."* Este campo só
+   aceitava `image/*` e trazia `capture="environment"`, que no celular abre a
+   CÂMERA direto — quem recebeu o desenho em PDF não conseguia nem ver o arquivo
+   na lista do explorador.
+
+   Agora o mesmo botão recebe os dois: imagem segue o caminho de sempre (passa
+   pelo canvas e virá JPEG dentro da peça); PDF vai para Arquivos do cliente,
+   com o MESMO limite e as MESMAS recusas explicadas do addAnexos — recusa
+   calada aqui seria a terceira vez no mês. */
+function desenhoFoto(id,e){
+  const f=e.target.files[0];
+  e.target.value='';                        // deixa escolher o mesmo arquivo de novo
+  if(!f)return;
+  if(/^image\//.test(f.type)){
+    compressImg(f,url=>{pecasState[id].desenhoFoto=url;renderDesenho(id);});
+    return;
+  }
+  if(!/^application\/pdf$/.test(f.type)){
+    toast('"'+f.name+'" não é PDF nem imagem — não anexei');
+    return;
+  }
+  if(f.size > ANEXO_MAX_MB*1024*1024){
+    toast('"'+f.name+'" tem '+(f.size/1024/1024).toFixed(1)+' MB e o limite é '+ANEXO_MAX_MB+' MB — não anexei');
+    return;
+  }
+  var r=new FileReader();
+  r.onload=function(ev){
+    anexos.push({nome:f.name, tipo:f.type, src:ev.target.result});
+    renderAnexos();
+    renderDesenho(id);
+    toast('Desenho anexado: '+f.name+' — está em Arquivos do cliente');
+  };
+  r.onerror=function(){ toast('Não consegui ler "'+f.name+'"'); };
+  r.readAsDataURL(f);
+}
 function desenhoDelFoto(id){pecasState[id].desenhoFoto='';renderDesenho(id);}
 function frisoTipoChange(sel){const box=sel.closest('.acabmed');if(!box)return;const dim=box.querySelector('.frisoDim');if(dim)dim.classList.toggle('hide',sel.value==='Padrão');}
 // botão "NA" ao lado de cada campo numérico (teclado numérico não digita letras)
