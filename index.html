@@ -740,7 +740,7 @@ const pecasState={}; // id -> {cb:'', visual:{}}
    estiver diferente do dos outros, aquele aparelho está atrasado.
    ATENÇÃO: "R 02-1" é a revisão do FORMULÁRIO (documento do SGQ) e não muda
    junto — são coisas diferentes. */
-const APP_VERSAO='v81';
+const APP_VERSAO='v82';
 const APP_DATA='30/09/2026';
 const SHEET_URL_PADRAO='https://script.google.com/macros/s/AKfycby1_Z5dh1Ug3lZe-ZPft0jGvdNpUB7celSCpWeY25q7Vb9YctDB81gKXrnYJRn1fWHlAw/exec';
 const CHAVE='petro-r02-9f4c1a';
@@ -4137,7 +4137,12 @@ function _fotosSemSubir(){
   var n=0;
   arr.forEach(function(d){
     if(!d||d.id==null||subiu[String(d.id)])return;
-    var tem=!!(d.assinatura)||!!((d.fotos||[]).length);
+    /* ⚠️ 11/11/2026 — O ANEXO FALTAVA AQUI, e ele é o mais pesado de todos.
+       Uma ficha com PDF que não subiu não era contada, então o botão dizia
+       "o espaço está sendo ocupado por outra coisa" — a frase tranquila —
+       justamente no caso perigoso: arquivo do cliente num aparelho só. */
+    var tem=!!(d.assinatura)||!!((d.fotos||[]).length)||
+            (d.anexos||[]).some(function(a){ return !!(a&&a.src); });
     (d.pecas||[]).forEach(function(p){
       if(!p)return;
       if((p.fotosPeca||[]).length||p.desenhoFoto)tem=true;
@@ -4242,17 +4247,201 @@ function _ocupacao(){
   itens.sort(function(a,b){return b.kb-a.kb;});
   return itens;
 }
+/* ═══ LIMPAR POR ESPAÇO, NÃO SÓ POR IDADE — 11/11/2026 ═════════════════════
+   *"Mas ele não conseguiu liberar espaço, isso arrumou?"* (Suzana). Não tinha
+   arrumado: o detalhamento só MOSTRA. Isto aqui é o conserto.
+
+   O print dela: 3.698 KB de ~5.000, e o botão dizendo "nada a liberar". Medi o
+   peso de uma ficha sem foto: 0,7 KB. Para 3.682 KB só de texto seriam ~5.400
+   fichas, que não existem. Logo o peso é FOTO — uma vintena delas — e a
+   limpeza não encostou porque só apaga foto confirmada com mais de
+   DIAS_FOTO_LOCAL dias. As fotos de ontem e de hoje ficam protegidas pela
+   regra, e são justamente elas que encheram o aparelho.
+
+   É o MESMO erro de 06/10, quando a janela era de 30 dias: a regra de idade
+   protegia tudo o que havia sobrado. Baixar a janela de novo só adia — o teto
+   do navegador é de ESPAÇO, então a regra também tem de ser de espaço.
+
+   O que esta limpeza faz, e só quando a de idade não bastou:
+   · toma as fichas da MAIS ANTIGA para a mais nova;
+   · apaga a cópia local de foto e anexo das que já estão CONFIRMADAS na nuvem
+     (a condição de sempre, e por isso é seguro: elas voltam do Storage quando
+     a ficha é aberta);
+   · para assim que o espaço cai abaixo do alvo, sem varrer o resto;
+   · NUNCA toca em ficha que não subiu — essa continua sendo alarme, não lixo.
+   O preço, dito em voz alta: abrir uma dessas fichas sem internet não mostra
+   as fotos. Elas estão no sistema, não no aparelho.                        */
+var ALVO_ESPACO_KB=2500;    // ~50% do teto: folga para o dia seguinte inteiro
+function _limparPorEspaco(alvoKB){
+  alvoKB=alvoKB||ALVO_ESPACO_KB;
+  var res={fichas:0, kb:0, sobrouSemSubir:0};
+  if(_tamanhoGuardado()<=alvoKB)return res;
+  var arr; try{ arr=JSON.parse(localStorage.getItem('petro_receb')||'[]'); }catch(e){ return res; }
+  if(!arr.length)return res;
+  var subiu={};
+  try{
+    if(typeof window._fotosSincronizadas!=='function')return res;   // sem confirmar, não apago
+    (window._fotosSincronizadas()||[]).forEach(function(x){ subiu[String(x)]=1; });
+  }catch(e){ return res; }
+  /* Da mais antiga para a mais nova: quem tem menos chance de ser reaberto
+     hoje perde a cópia local primeiro. */
+  var ordem=arr.map(function(d,i){ return {i:i, ts:Number(d&&d.id)||0}; })
+               .sort(function(a,b){ return a.ts-b.ts; });
+  var antes=_tamanhoGuardado();
+  /* ⚠️ UMA gravação só, no fim. A primeira versão gravava a lista inteira a
+     cada ficha limpa, para medir o espaço de verdade a cada passo. Num
+     aparelho REALMENTE cheio — o único caso em que isto roda — essa gravação
+     é justamente a que falha, e falharia calada dentro do catch: o laço
+     varreria tudo sem nada ser liberado. Então o alvo é perseguido pela
+     CONTA (o peso de cada ficha, que eu já sei medir) e o disco é tocado uma
+     vez, no fim, onde dá para conferir se coube. */
+  var faltaKB=antes-alvoKB;
+  for(var k=0;k<ordem.length && faltaKB>0;k++){
+    var d=arr[ordem[k].i];
+    if(!d)continue;
+    var peso=_pesoLocalDa(d);
+    if(!peso)continue;
+    if(!subiu[String(d.id)]){ res.sobrouSemSubir++; continue; }
+    if(d.fotos&&d.fotos.length)d.fotos=[];
+    (d.pecas||[]).forEach(function(p){
+      if(!p)return;
+      if(p.fotosPeca&&p.fotosPeca.length)p.fotosPeca=[];
+      if(p.desenhoFoto)p.desenhoFoto='';
+      (p.ponteiras||[]).forEach(function(x){ if(x&&x.foto)x.foto=''; });
+      (p.furos||[]).forEach(function(x){ if(x&&x.foto)x.foto=''; });
+    });
+    if(d.assinatura)d.assinatura='';
+    (d.anexos||[]).forEach(function(a){ if(a&&a.src)a.src=''; });   // nome e tipo ficam
+    res.fichas++;
+    faltaKB-=peso/1024;
+  }
+  /* As que não subiram e ficaram para trás também contam no aviso. */
+  for(var j=k;j<ordem.length;j++){
+    var dd=arr[ordem[j].i];
+    if(dd&&!subiu[String(dd.id)]&&_pesoLocalDa(dd))res.sobrouSemSubir++;
+  }
+  if(!res.fichas)return res;
+  try{ localStorage.setItem('petro_receb',JSON.stringify(arr)); }
+  catch(e){
+    /* Nem a lista menor coube. Não dá para dizer que liberou: a gravação é
+       que manda, não a conta. */
+    res.fichas=0; return res;
+  }
+  res.kb=Math.max(0, antes-_tamanhoGuardado());
+  return res;
+}
+/* Quanto esta ficha ocupa no aparelho em foto e anexo (o texto não conta:
+   são 0,7 KB por ficha, medidos em 11/11/2026, e ele não é apagável). */
+function _pesoLocalDa(d){
+  if(!d)return 0;
+  var n=String(d.assinatura||'').length;
+  (d.fotos||[]).forEach(function(f){ n+=String(f||'').length; });
+  (d.pecas||[]).forEach(function(p){
+    if(!p)return;
+    (p.fotosPeca||[]).forEach(function(f){ n+=String(f||'').length; });
+    n+=String(p.desenhoFoto||'').length;
+    (p.ponteiras||[]).forEach(function(x){ n+=String((x&&x.foto)||'').length; });
+    (p.furos||[]).forEach(function(x){ n+=String((x&&x.foto)||'').length; });
+  });
+  (d.anexos||[]).forEach(function(a){ n+=String((a&&a.src)||'').length; });
+  return n;
+}
+/* ═══ O QUE ESTÁ DENTRO DA LISTA — 11/11/2026 ══════════════════════════════
+   A Suzana fez o que esta tela pediu e mandou a lista: `petro_receb` com
+   3.682 KB de 3.698 KB. A lista por CHAVE cumpriu o papel dela em 02/10, mas
+   agora não diz mais nada: quase tudo está sempre na mesma chave, que é a
+   lista de fichas. Saber que o peso está em `petro_receb` é o mesmo que saber
+   que está cheio.
+
+   O que decide o que fazer é o que há DENTRO: foto ou anexo; de ficha que já
+   subiu ou de ficha que está num lugar só; dentro dos 2 dias (a limpeza não
+   toca de propósito) ou fora deles (devia ter sido limpa e não foi).
+   São quatro respostas diferentes, e até aqui as quatro apareciam como
+   "o espaço está sendo ocupado por outra coisa".                           */
+function _dentroDaLista(){
+  var r={fichas:0, fotoKB:0, anexoKB:0, textoKB:0, totalKB:0,
+         semSubirN:0, semSubirKB:0, novasN:0, novasKB:0, velhasN:0, velhasKB:0};
+  var bruto='';
+  try{ bruto=localStorage.getItem('petro_receb')||'[]'; }catch(e){ return r; }
+  r.totalKB=Math.round(bruto.length/1024);
+  var arr=[]; try{ arr=JSON.parse(bruto); }catch(e){ return r; }
+  var subiu={};
+  try{ ((window._fotosSincronizadas&&window._fotosSincronizadas())||[])
+         .forEach(function(x){ subiu[String(x)]=1; }); }catch(e){}
+  var limite=Date.now()-DIAS_FOTO_LOCAL*864e5;
+  arr.forEach(function(d){
+    if(!d)return;
+    r.fichas++;
+    var foto=0, anexo=0;
+    foto+=String(d.assinatura||'').length;
+    (d.fotos||[]).forEach(function(f){ foto+=String(f||'').length; });
+    (d.pecas||[]).forEach(function(p){
+      if(!p)return;
+      (p.fotosPeca||[]).forEach(function(f){ foto+=String(f||'').length; });
+      foto+=String(p.desenhoFoto||'').length;
+      (p.ponteiras||[]).forEach(function(x){ foto+=String((x&&x.foto)||'').length; });
+      (p.furos||[]).forEach(function(x){ foto+=String((x&&x.foto)||'').length; });
+    });
+    (d.anexos||[]).forEach(function(a){ anexo+=String((a&&a.src)||'').length; });
+    r.fotoKB+=foto/1024; r.anexoKB+=anexo/1024;
+    var pesa=foto+anexo;
+    if(!pesa)return;
+    var ts=Number(d.id)||0;
+    if(!subiu[String(d.id)]){ r.semSubirN++; r.semSubirKB+=pesa/1024; }
+    else if(!(ts&&ts<limite)){ r.novasN++;  r.novasKB+=pesa/1024; }
+    else { r.velhasN++; r.velhasKB+=pesa/1024; }
+  });
+  ['fotoKB','anexoKB','semSubirKB','novasKB','velhasKB'].forEach(function(k){
+    r[k]=Math.round(r[k]);
+  });
+  r.textoKB=Math.max(0, r.totalKB - r.fotoKB - r.anexoKB);
+  return r;
+}
+/* O quadro preto, escrito para alguém LER no celular e saber o que fazer. */
+function _textoDoQueOcupa(){
+  var det=_ocupacao().slice(0,6).map(function(x){ return x.chave+': '+x.kb+' KB'; }).join('<br>');
+  var r=_dentroDaLista();
+  var dentro='';
+  if(r.fichas){
+    dentro='<br><br>DENTRO DA LISTA DE FICHAS ('+r.fichas+' ficha(s), '+r.totalKB+' KB)'+
+      '<br>&nbsp;&nbsp;foto: '+r.fotoKB+' KB'+
+      '<br>&nbsp;&nbsp;arquivo anexado: '+r.anexoKB+' KB'+
+      '<br>&nbsp;&nbsp;texto da ficha: '+r.textoKB+' KB';
+    if(r.semSubirN) dentro+='<br><br>⚠️ '+r.semSubirN+' ficha(s) com '+r.semSubirKB+
+      ' KB que NÃO subiram.<br>&nbsp;&nbsp;Estão num lugar só. Não apago.';
+    if(r.novasN) dentro+='<br><br>'+r.novasN+' ficha(s) com '+r.novasKB+' KB de menos de '+
+      DIAS_FOTO_LOCAL+' dias.<br>&nbsp;&nbsp;Já subiram; guardo por '+DIAS_FOTO_LOCAL+' dias.';
+    if(r.velhasN) dentro+='<br><br>⚠️ '+r.velhasN+' ficha(s) com '+r.velhasKB+
+      ' KB passaram dos '+DIAS_FOTO_LOCAL+' dias<br>&nbsp;&nbsp;e não foram limpas. Me avise.';
+  }
+  return det+dentro;
+}
 function liberarEspaco(){
   var antes=_tamanhoGuardado();
   var conferiu=(typeof window._fotosSincronizadas==='function');
   _limparFotosAntigas();   // 2 dias — ver DIAS_FOTO_LOCAL
+  /* ⚠️ 11/11/2026 — O BOTÃO TEM DE LIBERAR, NÃO SÓ TENTAR PELA IDADE.
+     Quem aperta aqui está pedindo espaço. Se a regra de idade não alcançou
+     nada e o aparelho continua acima do limite, a limpeza por ESPAÇO entra:
+     foto e anexo já confirmados, da ficha mais antiga para a mais nova, até
+     voltar à folga. Ficha que não subiu continua intocada. */
+  var porEspaco={fichas:0, kb:0, sobrouSemSubir:0};
+  if(_tamanhoGuardado()>ALVO_ESPACO_KB) porEspaco=_limparPorEspaco();
   var depois=_tamanhoGuardado();
   var libertou=antes-depois;
   var s=document.getElementById('cfgEspaco');   // colado no botão — ver o comentário no HTML
   var msg;
   if(libertou>0){
     msg='<span class="status on">✓ Liberei '+libertou+' KB (de '+antes+' para '+depois+' KB). '+
-        'Tente salvar de novo.</span>';
+        'Tente salvar de novo.</span>'+
+        (porEspaco.fichas
+          ? '<div class="hint" style="margin-top:6px">Tirei deste aparelho a cópia das fotos de <b>'+
+            porEspaco.fichas+' ficha(s) antiga(s)</b> que já estão no sistema. '+
+            'Elas continuam lá: abrindo a ficha com internet, as fotos voltam.'+
+            (porEspaco.sobrouSemSubir
+              ? ' <b>Não mexi em '+porEspaco.sobrouSemSubir+' ficha(s) que ainda não subiram.</b>'
+              : '')+'</div>'
+          : '');
   }else if(!conferiu){
     msg='<span class="status off">Não liberei nada: este aparelho não conseguiu confirmar quais '+
         'fotos já subiram, e eu não apago foto sem essa confirmação. '+
@@ -4273,9 +4462,7 @@ function liberarEspaco(){
   }
   /* A lista por tamanho vai junto, sempre. É ela que diz se o problema são as
      fotos, a fila de envio ou a lista em si — e evita mais um dia de palpite. */
-  var det=_ocupacao().slice(0,6).map(function(x){
-    return x.chave+': '+x.kb+' KB';
-  }).join('<br>');
+  var det=_textoDoQueOcupa();
   if(s)s.innerHTML=msg+'<div style="margin-top:8px;font-size:11px;font-family:ui-monospace,Consolas,monospace;'+
     'background:#111;color:#eee;border-radius:8px;padding:8px 10px;line-height:1.6">'+
     'O QUE ESTÁ OCUPANDO (total '+depois+' KB)<br>'+det+'</div>';
